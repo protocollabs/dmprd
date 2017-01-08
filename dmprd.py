@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*- 
 
 import asyncio
 import socket
@@ -273,8 +273,26 @@ async def ipc_regular_update(db, conf):
         ipc_trigger_update_routes(conf, db)
 
 
-def init_sockets(ctx):
+def init_socket_v4_tx(ctx, addr_v4):
     pass
+
+
+def init_socket_v4_rx(ctx, addr_v4):
+    pass
+
+
+def init_sockets_v4(ctx, addr_v4):
+    init_socket_v4_tx(ctx, addr_v4)
+    init_socket_v4_rx(ctx, addr_v4)
+
+
+def init_sockets(ctx):
+    for interface in ctx['conf']['core']['interfaces']:
+        if "addr-v4" in interface:
+            init_sockets_v4(ctx, interface["addr-v4"])
+        #if "addr-v6" in interface:
+        #    init_sockets_v6(ctx, interface["addr-v6"])
+
 
 def ask_exit(signame, ctx):
     sys.stderr.write("\rreceived signal \"%s\": exit now, bye\n" % signame)
@@ -290,9 +308,15 @@ def parse_args():
         sys.exit(1)
     return args
 
+
 def verify_conf(conf):
     if not "core" in conf:
-        raise ConfigurationException("conf invalid, need core part")
+        msg = "conf invalid, need core part"
+        raise ConfigurationException(msg)
+    core = conf['core']
+    if not "interfaces" in core:
+        msg = "Configuration invalid, interfaces not in core"
+        raise ConfigurationException(msg)
 
 
 def load_configuration_file(args):
