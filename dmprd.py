@@ -19,6 +19,8 @@ import urllib.error
 
 class ConfigurationException(Exception): pass
 
+TX_DEFAULT_TTL = 8
+RECVFROM_BUF_SIZE = 16384
 
 # don't recognize own mcast transmissions
 # by default, can be changed for debugging
@@ -59,9 +61,9 @@ def init_v4_tx_fd(conf):
     return sock
 
 
-def cb_v4_rx(fd, queue):
+def cb_v4_rx(fd, ctx):
     try:
-        data, addr = fd.recvfrom(1024)
+        data, addr = fd.recvfrom(RECVFROM_BUF_SIZE)
     except socket.error as e:
         print('Expection')
     d = {}
@@ -70,9 +72,11 @@ def cb_v4_rx(fd, queue):
     d["src-port"]  = addr[1]
     d["data"]  = data
     try:
-        queue.put_nowait(d)
+        pass
+        #queue.put_nowait(d)
     except asyncio.queues.QueueFull:
         sys.stderr.write("queue overflow, strange things happens")
+
 
 def create_payload_routing(conf, data):
     if "network-announcement" in conf:
@@ -150,19 +154,6 @@ def parse_payload(packet):
     return ret
 
 
-async def tx_v4(fd, conf):
-    addr     = conf['core']['v4-addr']
-    port     = int(conf['core']['v4-port'])
-    interval = float(conf['core']['tx-interval'])
-    while True:
-        try:
-            data = create_payload(conf)
-            fd.sendto(data, (addr, port))
-        except Exception as e:
-            print(str(e))
-        await asyncio.sleep(interval)
-
-
 def ctx_new(conf):
     db = {}
     db['conf'] = conf
@@ -191,105 +182,64 @@ def db_entry_new(conf, db, data, prefix):
     print("new route announcement for {} by {}".format(prefix, data["src-addr"]))
 
 
-def update_db(conf, db, data):
-    new_entry = False
-
-    if "hna" not in data["payload"]:
-        print("no HNA data in payload, ignoring it")
-        return
-
-    for entry in data["payload"]["hna"]:
-        found = False
-        prefix = "{}/{}".format(entry[0], entry[1])
-        for db_entry in db["networks"]:
-            if prefix == db_entry[0]:
-                db_entry_update(db_entry, data, prefix)
-                found = True
-        if not found:
-            db_entry_new(conf, db, data, prefix)
-            new_entry = True
-
-    if new_entry:
-        ipc_trigger_update_routes(conf, db)
 
 
-async def handle_packet(queue, conf, db):
+
+
+async def ticker(ctx):
     while True:
-        entry = await queue.get()
-        data = parse_payload(entry)
-        if data:
-            update_db(conf, db, data)
+        await asyncio.sleep(1)
 
 
-def ipc_send_request(conf, data = None):
-    url = "http://{}:{}{}".format(conf["update-ipc"]["host"], conf["update-ipc"]["port"], conf["update-ipc"]["url"])
-    user_agent_headers = { 'Content-type': 'application/json',
-                           'Accept':       'application/json' }
+def rx_v4_socket_create(port, mcast_addr):
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    if hasattr(sock, "SO_REUSEPORT"):
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
 
-    # just ignore any configured system proxy, we don't need
-    # a proxy for localhost communication
-    proxy_support = urllib.request.ProxyHandler({})
-    opener = urllib.request.build_opener(proxy_support)
-    urllib.request.install_opener(opener)
+    sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, MCAST_LOOP)
 
-    request = urllib.request.Request(url, data.encode('ascii'), user_agent_headers)
-    try:
-        server_response = urllib.request.urlopen(request).read()
-    except urllib.error.HTTPError as e:
-        print("Failed to reach the IPC server ({}): '{}'".format(url, e.reason))
-        return
-    except urllib.error.URLError as e:
-        print("Failed to reach the IPC server ({}): '{}'".format(url, e.reason))
-        return
-    server_data = addict.Dict(json.loads(str(server_response, "utf-8")))
-    if server_data.status != "ok":
-        print(server_data)
+    sock.bind(('', int(port)))
+    host = socket.gethostbyname(socket.gethostname())
+    sock.setsockopt(socket.SOL_IP, socket.IP_MULTICAST_IF, socket.inet_aton(host))
+
+    mreq = struct.pack("4sl", socket.inet_aton(mcast_addr), socket.INADDR_ANY)
+    sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+    return sock
 
 
-def ipc_trigger_update_routes(conf, db):
-    cmd = {}
-    cmd["terminal"] = {}
-    cmd["terminal"]["ip"] = conf["core"]["terminal-v4-addr"]
-    cmd["terminal"]["bandwidth_max"] = "5000 bit/s"
-
-    cmd["routes"] = []
-
-    for db_entry in db["networks"]:
-        prefix, prefix_len = db_entry[0].split("/")
-        e = {}
-        e["l2-proto"] = "IPv4"
-        e["prefix"]     = prefix
-        e["prefix-len"] = prefix_len
-        cmd["routes"].append(e)
-
-    cmd_json = json.dumps(cmd)
-    ipc_send_request(conf, cmd_json)
+def tx_v4_socket_create(addr, ttl):
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, int(ttl))
+    sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, socket.inet_aton(addr))
+    return sock
 
 
-async def ipc_regular_update(db, conf):
-    while True:
-        await asyncio.sleep(float(conf["update-ipc"]["max-update-interval"]))
-        print("regular IPC update active")
-        ipc_trigger_update_routes(conf, db)
+def init_socket_v4_tx(ctx, interface):
+    addr_v4 = interface['addr-v4']
+    ttl = TX_DEFAULT_TTL
+    if 'ttl-v4' in interface:
+        ttl = int(interface['ttl-v4'])
+    ctx['v4-tx-fd'] = tx_v4_socket_create(addr_v4, ttl)
 
 
-def init_socket_v4_tx(ctx, addr_v4):
-    pass
+def init_socket_v4_rx(ctx, interface):
+    port = ctx['conf']['core']['port']
+    mcast_addr = ctx['conf']['core']['mcast-v4-tx-addr']
+    fd = rx_v4_socket_create(port, mcast_addr)
+    ctx['loop'].add_reader(fd, functools.partial(cb_v4_rx, fd, ctx))
 
 
-def init_socket_v4_rx(ctx, addr_v4):
-    pass
-
-
-def init_sockets_v4(ctx, addr_v4):
-    init_socket_v4_tx(ctx, addr_v4)
-    init_socket_v4_rx(ctx, addr_v4)
+def init_sockets_v4(ctx, interface):
+    init_socket_v4_tx(ctx, interface)
+    init_socket_v4_rx(ctx, interface)
 
 
 def init_sockets(ctx):
     for interface in ctx['conf']['core']['interfaces']:
         if "addr-v4" in interface:
-            init_sockets_v4(ctx, interface["addr-v4"])
+            init_sockets_v4(ctx, interface)
         #if "addr-v6" in interface:
         #    init_sockets_v6(ctx, interface["addr-v6"])
 
@@ -339,26 +289,11 @@ def main():
     ctx['loop'] = asyncio.get_event_loop()
 
     init_sockets(ctx)
-
-    #  # RX functionality
-    #  fd = init_v4_rx_fd(ctx)
-    #  loop.add_reader(fd, functools.partial(cb_v4_rx, fd, ctx))
-
-    #  # TX side
-    #  fd = init_v4_tx_fd(ctx)
-    #  asyncio.ensure_future(tx_v4(fd, ctx))
-
-    #  # Outputter
-    #  asyncio.ensure_future(handle_packet(queue, ctx))
-
-    #  # we regulary transmit
-    #  asyncio.ensure_future(ipc_regular_update(db, ctx))
-
+    asyncio.ensure_future(ticker(ctx))
 
     for signame in ('SIGINT', 'SIGTERM'):
         ctx['loop'].add_signal_handler(getattr(signal, signame),
                                        functools.partial(ask_exit, signame, ctx))
-
     try:
         ctx['loop'].run_forever()
         # workaround for bug, see: https://bugs.python.org/issue23548
