@@ -26,39 +26,6 @@ RECVFROM_BUF_SIZE = 16384
 # by default, can be changed for debugging
 MCAST_LOOP = 0
 
-# ident to drop all non-RouTinG applications.
-IDENT = "RTG".encode('ascii')
-
-# identify this sender
-SECRET_COOKIE = str(uuid.uuid4())
-
-# data compression level
-ZIP_COMPRESSION_LEVEL = 9
-
-
-def init_v4_rx_fd(conf):
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    if hasattr(sock, "SO_REUSEPORT"):
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
-
-    sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, MCAST_LOOP)
-
-    sock.bind(('', int(conf['core']['v4-port'])))
-    host = socket.gethostbyname(socket.gethostname())
-    sock.setsockopt(socket.SOL_IP, socket.IP_MULTICAST_IF, socket.inet_aton(host))
-
-    mreq = struct.pack("4sl", socket.inet_aton(conf['core']['v4-addr']), socket.INADDR_ANY)
-    sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
-    return sock
-
-
-def init_v4_tx_fd(conf):
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, int(conf['core']['v4-ttl']))
-    sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, socket.inet_aton(conf['core']['v4-out-addr']))
-    return sock
 
 
 def cb_v4_rx(fd, ctx):
@@ -321,7 +288,6 @@ def main():
 
     ctx['loop'] = asyncio.get_event_loop()
     ctx['loop'].set_debug(True)
-
 
     init_sockets(ctx)
     asyncio.ensure_future(ticker(ctx))
