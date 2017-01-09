@@ -46,11 +46,14 @@ class LoggerClone:
     error = msg
     critical = msg
 
+
 def cb_routing_table_update(routing_table):
     pass
 
+
 def cb_msg_tx(interface_name, proto, mcast_addr, msg):
     pass
+
 
 def cb_time():
     return time.clock_gettime(time.CLOCK_MONOTONIC_RAW)
@@ -285,6 +288,8 @@ def init_sockets(ctx):
 
 def shutdown_dmprd(signame, ctx):
     sys.stderr.write("\rreceived signal \"%s\": exit now, bye\n" % signame)
+    if 'core' in ctx:
+        ctx['core'].stop()
     for task in asyncio.Task.all_tasks():
         task.cancel()
 
