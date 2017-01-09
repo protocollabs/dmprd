@@ -179,6 +179,7 @@ async def ticker(ctx):
     while True:
         try:
             await asyncio.sleep(1)
+            ctx['core'].tick()
         except asyncio.CancelledError:
             break
     asyncio.get_event_loop().stop()
@@ -327,9 +328,9 @@ def main():
     ctx['loop'].set_debug(True)
 
     init_sockets(ctx)
+    setup_core(ctx)
     asyncio.ensure_future(ticker(ctx))
 
-    setup_core(ctx)
 
     for signame in ('SIGINT', 'SIGTERM'):
         ctx['loop'].add_signal_handler(getattr(signal, signame),
