@@ -17,6 +17,8 @@ import datetime
 import urllib.request
 import urllib.error
 
+import core.dmpr
+
 class ConfigurationException(Exception): pass
 
 TX_DEFAULT_TTL = 8
@@ -26,6 +28,36 @@ RECVFROM_BUF_SIZE = 16384
 # by default, can be changed for debugging
 MCAST_LOOP = 0
 
+
+class LoggerClone:
+
+
+    def __init__(self):
+        pass
+
+    def msg(self, msg, time=None):
+        msg = "{} {}\n".format(time, msg)
+        self.stderr.write(msg)
+
+
+    debug = msg
+    info = msg
+    warning = msg
+    error = msg
+    critical = msg
+
+
+def setup_core(ctx):
+    log = LoggerClone()
+    ctx['core'] = core.dmpr.DMPR(log=log)
+
+    #self._core.register_routing_table_update_cb(self.routing_table_update_cb)
+    #self._core.register_msg_tx_cb(self.msg_tx_cb)
+    #self._core.register_get_time_cb(self.get_time)
+
+    #conf = self._gen_configuration()
+    #self._conf = conf
+    #self._core.register_configuration(conf)
 
 
 def cb_v4_rx(fd, ctx):
@@ -291,6 +323,8 @@ def main():
 
     init_sockets(ctx)
     asyncio.ensure_future(ticker(ctx))
+
+    setup_core(ctx)
 
     for signame in ('SIGINT', 'SIGTERM'):
         ctx['loop'].add_signal_handler(getattr(signal, signame),
