@@ -276,7 +276,7 @@ def init_sockets(ctx):
             init_sockets_v6(ctx, interface)
 
 
-def ask_exit(signame, ctx):
+def shutdown_dmprd(signame, ctx):
     sys.stderr.write("\rreceived signal \"%s\": exit now, bye\n" % signame)
     for task in asyncio.Task.all_tasks():
         task.cancel()
@@ -328,7 +328,7 @@ def main():
 
     for signame in ('SIGINT', 'SIGTERM'):
         ctx['loop'].add_signal_handler(getattr(signal, signame),
-                                       functools.partial(ask_exit, signame, ctx))
+                                       functools.partial(shutdown_dmprd, signame, ctx))
     try:
         ctx['loop'].run_forever()
         # workaround for bug, see: https://bugs.python.org/issue23548
