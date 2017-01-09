@@ -171,13 +171,13 @@ def db_entry_new(conf, db, data, prefix):
     print("new route announcement for {} by {}".format(prefix, data["src-addr"]))
 
 
-
-
-
-
 async def ticker(ctx):
     while True:
-        await asyncio.sleep(1)
+        try:
+            await asyncio.sleep(1)
+        except asyncio.CancelledError:
+            break
+    asyncio.get_event_loop().stop()
 
 
 def rx_v4_socket_create(port, mcast_addr):
@@ -278,7 +278,8 @@ def init_sockets(ctx):
 
 def ask_exit(signame, ctx):
     sys.stderr.write("\rreceived signal \"%s\": exit now, bye\n" % signame)
-    ctx['loop'].stop()
+    for task in asyncio.Task.all_tasks():
+        task.cancel()
 
 
 def parse_args():
@@ -319,6 +320,8 @@ def main():
     ctx = ctx_new(conf)
 
     ctx['loop'] = asyncio.get_event_loop()
+    ctx['loop'].set_debug(True)
+
 
     init_sockets(ctx)
     asyncio.ensure_future(ticker(ctx))
