@@ -78,33 +78,22 @@ def cb_v4_rx(fd, ctx):
         sys.stderr.write("queue overflow, strange things happens")
 
 
-def create_payload_routing(conf, data):
-    if "network-announcement" in conf:
-        data["hna"] = conf["network-announcement"]
+def cb_v6_rx(fd, ctx):
+    try:
+        data, addr = fd.recvfrom(RECVFROM_BUF_SIZE)
+    except socket.error as e:
+        print('Expection')
+    d = {}
+    d["proto"] = "IPv6"
+    d["src-addr"]  = addr[0]
+    d["src-port"]  = addr[1]
+    d["data"]  = data
+    try:
+        pass
+        #queue.put_nowait(d)
+    except asyncio.queues.QueueFull:
+        sys.stderr.write("queue overflow, strange things happens")
 
-def create_payload_data(conf):
-    data = {}
-    data["cookie"] = SECRET_COOKIE
-    create_payload_routing(conf, data)
-    json_data = json.dumps(data)
-    byte_stream = str.encode(json_data)
-    compressed = zlib.compress(byte_stream, ZIP_COMPRESSION_LEVEL)
-    #print("compression stats: before {} byte - after compression {} byte".format(len(byte_stream), len(compressed)))
-    return compressed
-
-
-def create_payload_header(data_len):
-    ident = IDENT
-    assert len(IDENT) == 3
-    data = SECRET_COOKIE
-    head = struct.pack('>I', data_len)
-    return ident + head
-
-
-def create_payload(conf):
-    payload = create_payload_data(conf)
-    header = create_payload_header(len(payload))
-    return header + payload
 
 
 def parse_payload_header(raw):
@@ -199,7 +188,7 @@ def rx_v4_socket_create(port, mcast_addr):
 
     sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, MCAST_LOOP)
 
-    sock.bind(('', int(port)))
+    sock.bind(('', port))
     host = socket.gethostbyname(socket.gethostname())
     sock.setsockopt(socket.SOL_IP, socket.IP_MULTICAST_IF, socket.inet_aton(host))
 
@@ -211,7 +200,7 @@ def rx_v4_socket_create(port, mcast_addr):
 def tx_v4_socket_create(addr, ttl):
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, int(ttl))
+    sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, ttl)
     sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, socket.inet_aton(addr))
     return sock
 
@@ -225,7 +214,7 @@ def init_socket_v4_tx(ctx, interface):
 
 
 def init_socket_v4_rx(ctx, interface):
-    port = ctx['conf']['core']['port']
+    port = int(ctx['conf']['core']['port'])
     mcast_addr = ctx['conf']['core']['mcast-v4-tx-addr']
     fd = rx_v4_socket_create(port, mcast_addr)
     ctx['loop'].add_reader(fd, functools.partial(cb_v4_rx, fd, ctx))
@@ -236,12 +225,55 @@ def init_sockets_v4(ctx, interface):
     init_socket_v4_rx(ctx, interface)
 
 
+def tx_v6_socket_create(addr, ttl):
+    addrinfo = socket.getaddrinfo(addr, None)[0]
+    sock = socket.socket(addrinfo[0], socket.SOCK_DGRAM)
+    sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_HOPS, ttl)
+    return sock
+
+
+def init_socket_v6_tx(ctx, interface):
+    addr_v6 = ctx['conf']['core']['mcast-v6-tx-addr']
+    ttl = TX_DEFAULT_TTL
+    if 'ttl-v6' in interface:
+        ttl = int(interface['ttl-v6'])
+    ctx['v6-tx-fd'] = tx_v6_socket_create(addr_v6, ttl)
+
+
+def rx_v6_socket_create(port, mcast_addr):
+    addrinfo = socket.getaddrinfo(mcast_addr, None)[0]
+    sock = socket.socket(addrinfo[0], socket.SOCK_DGRAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    if hasattr(sock, "SO_REUSEPORT"):
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+
+    sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_LOOP, MCAST_LOOP)
+
+    sock.bind(('', port))
+    group_bin = socket.inet_pton(addrinfo[0], addrinfo[4][0])
+    mreq = group_bin + struct.pack('@I', 0)
+    sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_JOIN_GROUP, mreq)
+    return sock
+
+
+def init_socket_v6_rx(ctx, interface):
+    port = int(ctx['conf']['core']['port'])
+    mcast_addr = ctx['conf']['core']['mcast-v6-tx-addr']
+    fd = rx_v6_socket_create(port, mcast_addr)
+    ctx['loop'].add_reader(fd, functools.partial(cb_v6_rx, fd, ctx))
+
+
+def init_sockets_v6(ctx, interface):
+    init_socket_v6_tx(ctx, interface)
+    init_socket_v6_rx(ctx, interface)
+
+
 def init_sockets(ctx):
     for interface in ctx['conf']['core']['interfaces']:
         if "addr-v4" in interface:
             init_sockets_v4(ctx, interface)
-        #if "addr-v6" in interface:
-        #    init_sockets_v6(ctx, interface["addr-v6"])
+        if "addr-v6" in interface:
+            init_sockets_v6(ctx, interface)
 
 
 def ask_exit(signame, ctx):
