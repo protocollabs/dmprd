@@ -46,18 +46,23 @@ class LoggerClone:
     error = msg
     critical = msg
 
+def cb_routing_table_update(routing_table):
+    pass
+
+def cb_msg_tx(interface_name, proto, mcast_addr, msg):
+    pass
+
+def cb_time():
+    return time.clock_gettime(time.CLOCK_MONOTONIC_RAW)
+
 
 def setup_core(ctx):
     log = LoggerClone()
     ctx['core'] = core.dmpr.DMPR(log=log)
 
-    #self._core.register_routing_table_update_cb(self.routing_table_update_cb)
-    #self._core.register_msg_tx_cb(self.msg_tx_cb)
-    #self._core.register_get_time_cb(self.get_time)
-
-    #conf = self._gen_configuration()
-    #self._conf = conf
-    #self._core.register_configuration(conf)
+    self._core.register_routing_table_update_cb(cb_routing_table_update)
+    self._core.register_msg_tx_cb(cb_msg_tx)
+    self._core.register_get_time_cb(cb_time)
 
 
 def cb_v4_rx(fd, ctx):
