@@ -37,7 +37,7 @@ class LoggerClone:
 
     def msg(self, msg, time=None):
         msg = "{} {}\n".format(time, msg)
-        self.stderr.write(msg)
+        sys.stderr.write(msg)
 
 
     debug = msg
@@ -60,9 +60,11 @@ def setup_core(ctx):
     log = LoggerClone()
     ctx['core'] = core.dmpr.DMPR(log=log)
 
-    self._core.register_routing_table_update_cb(cb_routing_table_update)
-    self._core.register_msg_tx_cb(cb_msg_tx)
-    self._core.register_get_time_cb(cb_time)
+    ctx['core'].register_configuration(ctx['conf']['core'])
+
+    ctx['core'].register_routing_table_update_cb(cb_routing_table_update)
+    ctx['core'].register_msg_tx_cb(cb_msg_tx)
+    ctx['core'].register_get_time_cb(cb_time)
 
 
 def cb_v4_rx(fd, ctx):
@@ -330,6 +332,8 @@ def main():
     init_sockets(ctx)
     setup_core(ctx)
     asyncio.ensure_future(ticker(ctx))
+
+    ctx['core'].start()
 
 
     for signame in ('SIGINT', 'SIGTERM'):
