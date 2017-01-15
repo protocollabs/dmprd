@@ -66,7 +66,7 @@
 
 
 	"route-info-broadcaster" : {
-        "url" : "http://localhost:8888/api/v1/route-full-dynamic",
+        "url" : "http://localhost:16001/api/v1/route-full-dynamic",
         "interval" : 1
 	}
 }

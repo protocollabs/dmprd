@@ -15,6 +15,7 @@ import uuid
 import json
 import datetime
 import urllib.request
+import pprint
 
 import core.dmpr
 
@@ -301,14 +302,15 @@ def broadcast_routing_table(ctx):
     urllib.request.install_opener(opener)
     req = urllib.request.Request(url)
     req.add_header('Content-Type', 'application/json')
+    req.add_header('Accept', 'application/json')
     req.add_header('User-Agent', 'Mozilla/5.0 (compatible; Chrome/22.0.1229.94; Windows NT)')
     data = dict()
     data['route-tables'] = ctx['routing-tables']
     tx_data = json.dumps(data).encode('utf-8')
     try:
         with urllib.request.urlopen(req, tx_data, timeout=3) as res:
-            resp = f.read()
-            print(resp)
+            resp = json.loads(str(res.read(), "utf-8"))
+            print(pprint.pformat(resp))
     except urllib.error.URLError as e:
         print("Connection error: {}".format(e))
 
