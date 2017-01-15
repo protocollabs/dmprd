@@ -294,6 +294,11 @@ async def ticker(ctx):
 def broadcast_routing_table(ctx):
     url = ctx['conf']['route-info-broadcaster']['url']
     print("write routing table to {}".format(url))
+    # just ignore any configured system proxy, we don't need
+    # a proxy for localhost communication
+    proxy_support = urllib.request.ProxyHandler({})
+    opener = urllib.request.build_opener(proxy_support)
+    urllib.request.install_opener(opener)
     req = urllib.request.Request(url)
     req.add_header('Content-Type', 'application/json')
     req.add_header('User-Agent', 'Mozilla/5.0 (compatible; Chrome/22.0.1229.94; Windows NT)')
