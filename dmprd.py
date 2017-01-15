@@ -28,6 +28,10 @@ RECVFROM_BUF_SIZE = 16384
 # by default, can be changed for debugging
 MCAST_LOOP = 0
 
+# instance date
+data = dict()
+data['routing-table'] = None
+
 
 class LoggerClone:
 
@@ -48,7 +52,9 @@ class LoggerClone:
 
 
 def cb_routing_table_update(routing_table):
-    pass
+    global data
+    print("receive new routing table")
+    data['routing-table'] = routing_table
 
 
 def cb_msg_tx(interface_name, proto, mcast_addr, msg):
@@ -180,16 +186,6 @@ def db_entry_new(conf, db, data, prefix):
     print("new route announcement for {} by {}".format(prefix, data["src-addr"]))
 
 
-async def ticker(ctx):
-    while True:
-        try:
-            await asyncio.sleep(1)
-            ctx['core'].tick()
-        except asyncio.CancelledError:
-            break
-    asyncio.get_event_loop().stop()
-
-
 def rx_v4_socket_create(port, mcast_addr):
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -286,6 +282,30 @@ def init_sockets(ctx):
             init_sockets_v6(ctx, interface)
 
 
+async def ticker(ctx):
+    while True:
+        try:
+            await asyncio.sleep(1)
+            ctx['core'].tick()
+        except asyncio.CancelledError:
+            break
+    asyncio.get_event_loop().stop()
+
+
+async def route_broadcast(ctx):
+    interval = 10
+    if "interval" in ctx['conf']['route-info-broadcaster']:
+        interval = ctx['conf']['route-info-broadcaster']['interval']
+    while True:
+        try:
+            await asyncio.sleep(interval)
+            ctx['core'].tick()
+        except asyncio.CancelledError:
+            break
+    asyncio.get_event_loop().stop()
+
+
+
 def shutdown_dmprd(signame, ctx):
     sys.stderr.write("\rreceived signal \"%s\": exit now, bye\n" % signame)
     if 'core' in ctx:
@@ -337,6 +357,8 @@ def main():
     init_sockets(ctx)
     setup_core(ctx)
     asyncio.ensure_future(ticker(ctx))
+    if "route-info-broadcaster" in ctx['conf']:
+        asyncio.ensure_future(route_broadcast(ctx))
 
     ctx['core'].start()
 
