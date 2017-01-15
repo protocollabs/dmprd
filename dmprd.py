@@ -27,9 +27,6 @@ RECVFROM_BUF_SIZE = 16384
 # by default, can be changed for debugging
 MCAST_LOOP = 0
 
-# instance date
-data = dict()
-data['routing-table'] = None
 
 
 class LoggerClone:
@@ -50,17 +47,19 @@ class LoggerClone:
     critical = msg
 
 
-def cb_routing_table_update(routing_table):
-    global data
+def cb_routing_table_update(routing_tables, priv_data=None):
+    assert(priv_data)
+    ctx = priv_data
     print("receive new routing table")
-    data['routing-table'] = routing_table
+    ctx['routing-tables'] = routing_tables
+    broadcast_routing_table(ctx)
 
 
-def cb_msg_tx(interface_name, proto, mcast_addr, msg):
+def cb_msg_tx(interface_name, proto, mcast_addr, msg, priv_data=None):
     pass
 
 
-def cb_time():
+def cb_time(priv_data=None):
     return time.clock_gettime(time.CLOCK_MONOTONIC_RAW)
 
 
@@ -70,9 +69,9 @@ def setup_core(ctx):
 
     ctx['core'].register_configuration(ctx['conf']['core'])
 
-    ctx['core'].register_routing_table_update_cb(cb_routing_table_update)
-    ctx['core'].register_msg_tx_cb(cb_msg_tx)
-    ctx['core'].register_get_time_cb(cb_time)
+    ctx['core'].register_routing_table_update_cb(cb_routing_table_update, priv_data=ctx)
+    ctx['core'].register_msg_tx_cb(cb_msg_tx, priv_data=ctx)
+    ctx['core'].register_get_time_cb(cb_time, priv_data=ctx)
 
 
 def cb_v4_rx(fd, ctx):
@@ -161,6 +160,7 @@ def ctx_new(conf):
     db = {}
     db['conf'] = conf
     db['queue'] = asyncio.Queue(32)
+    db['routing-tables'] = None
     return db
 
 
@@ -298,6 +298,7 @@ def broadcast_routing_table(ctx):
     req.add_header('Content-Type', 'application/json')
     req.add_header('User-Agent', 'Mozilla/5.0 (compatible; Chrome/22.0.1229.94; Windows NT)')
     data = dict()
+    data['route-tables'] = ctx['routing-tables']
     tx_data = json.dumps(data).encode('utf-8')
     try:
         with urllib.request.urlopen(req, tx_data, timeout=3) as res:
