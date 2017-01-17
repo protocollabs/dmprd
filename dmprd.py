@@ -327,7 +327,9 @@ async def ticker(ctx):
 def broadcast_routing_table(ctx):
     if not ctx['routing-tables']:
         return
+    print("\n\nROUTING TABLE\n\n")
     print(ctx['routing-tables'])
+    print("\n\n")
     url = ctx['conf']['route-info-broadcaster']['url']
     #print("write routing table to {}".format(url))
     # just ignore any configured system proxy, we don't need
