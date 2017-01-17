@@ -37,9 +37,10 @@ class LoggerClone:
         pass
 
     def msg(self, msg, time=None):
-        msg = "{} {}\n".format(time, msg)
+        if not time:
+            time = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        msg = "{}: {}\n".format(time, msg)
         sys.stderr.write(msg)
-
 
     debug = msg
     info = msg
@@ -56,8 +57,38 @@ def cb_routing_table_update(routing_tables, priv_data=None):
     broadcast_routing_table(ctx)
 
 
-def cb_msg_tx(interface_name, proto, mcast_addr, msg, priv_data=None):
-    pass
+def create_routing_packet(self, msg):
+    msg_json = json.dumps(msg)
+    return str.encode(msg_json)
+
+def tx_v4(ctx, iface, mcast_addr, pkt):
+    port = int(ctx['conf']['core']['port'])
+    fd = ctx['iface'][iface]['v4-tx-fd']
+    try:
+        print("send v4 rtn packet tp {}:{}".format(mcast_addr, port))
+        fd.sendto(pkt, (mcast_addr, port))
+    except Exception as e:
+        print("Exception: {}".format(str(e)))
+
+
+def tx_v6(ctx, iface, mcast_addr, pkt):
+    port = int(ctx['conf']['core']['port'])
+    fd = ctx['iface'][iface]['v6-tx-fd']
+    try:
+        print("send v6 rtn packet tp {}:{}".format(mcast_addr, port))
+        fd.sendto(pkt, (mcast_addr, port))
+    except Exception as e:
+        print("Exception: {}".format(str(e)))
+
+
+def cb_msg_tx(iface_name, proto, mcast_addr, msg, priv_data=None):
+    assert priv_data
+    ctx = priv_data
+    pkt = create_routing_packet(ctx, msg)
+    if proto == 'v4':
+        tx_v4(ctx, iface_name, mcast_addr, pkt)
+    if proto == 'v6':
+        tx_v6(ctx, iface_name, mcast_addr, pkt)
 
 
 def cb_time(priv_data=None):
@@ -160,6 +191,7 @@ def parse_payload(packet):
 def ctx_new(conf):
     db = {}
     db['conf'] = conf
+    db['iface'] = dict()
     db['queue'] = asyncio.Queue(32)
     db['routing-tables'] = None
     return db
@@ -211,12 +243,12 @@ def tx_v4_socket_create(addr, ttl):
     return sock
 
 
-def init_socket_v4_tx(ctx, interface):
-    addr_v4 = interface['addr-v4']
+def init_socket_v4_tx(ctx, iface):
+    addr_v4 = iface['addr-v4']
     ttl = TX_DEFAULT_TTL
-    if 'ttl-v4' in interface:
-        ttl = int(interface['ttl-v4'])
-    ctx['v4-tx-fd'] = tx_v4_socket_create(addr_v4, ttl)
+    if 'ttl-v4' in iface:
+        ttl = int(iface['ttl-v4'])
+    ctx['iface'][iface['name']]['v4-tx-fd'] = tx_v4_socket_create(addr_v4, ttl)
 
 
 def init_socket_v4_rx(ctx, interface):
@@ -238,12 +270,12 @@ def tx_v6_socket_create(addr, ttl):
     return sock
 
 
-def init_socket_v6_tx(ctx, interface):
+def init_socket_v6_tx(ctx, iface):
     addr_v6 = ctx['conf']['core']['mcast-v6-tx-addr']
     ttl = TX_DEFAULT_TTL
-    if 'ttl-v6' in interface:
-        ttl = int(interface['ttl-v6'])
-    ctx['v6-tx-fd'] = tx_v6_socket_create(addr_v6, ttl)
+    if 'ttl-v6' in iface:
+        ttl = int(iface['ttl-v6'])
+    ctx['iface'][iface['name']]['v6-tx-fd'] = tx_v6_socket_create(addr_v6, ttl)
 
 
 def rx_v6_socket_create(port, mcast_addr):
@@ -276,6 +308,9 @@ def init_sockets_v6(ctx, interface):
 
 def init_sockets(ctx):
     for interface in ctx['conf']['core']['interfaces']:
+        iface_name = interface['name']
+        if not iface_name in ctx['iface']:
+            ctx['iface'][iface_name] = dict()
         if "addr-v4" in interface:
             init_sockets_v4(ctx, interface)
         if "addr-v6" in interface:
