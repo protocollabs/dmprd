@@ -52,14 +52,19 @@ class LoggerClone:
 def cb_routing_table_update(routing_tables, priv_data=None):
     assert(priv_data)
     ctx = priv_data
-    print("receive new routing table")
     ctx['routing-tables'] = routing_tables
     broadcast_routing_table(ctx)
 
 
-def create_routing_packet(self, msg):
+def create_routing_packet(msg):
     msg_json = json.dumps(msg)
     return str.encode(msg_json)
+
+
+def decreate_routing_packet(msg):
+    ascii_str = msg.decode('ascii')
+    return json.loads(ascii_str)
+
 
 def tx_v4(ctx, iface, mcast_addr, pkt):
     port = int(ctx['conf']['core']['port'])
@@ -84,7 +89,7 @@ def tx_v6(ctx, iface, mcast_addr, pkt):
 def cb_msg_tx(iface_name, proto, mcast_addr, msg, priv_data=None):
     assert priv_data
     ctx = priv_data
-    pkt = create_routing_packet(ctx, msg)
+    pkt = create_routing_packet(msg)
     if proto == 'v4':
         tx_v4(ctx, iface_name, mcast_addr, pkt)
     if proto == 'v6':
@@ -106,38 +111,30 @@ def setup_core(ctx):
     ctx['core'].register_get_time_cb(cb_time, priv_data=ctx)
 
 
-def cb_v4_rx(fd, ctx):
+def cb_v4_rx(fd, ctx, interface):
     try:
         data, addr = fd.recvfrom(RECVFROM_BUF_SIZE)
+        src_addr = addr[0]
+        src_port = addr[1]
+        iface_name = interface['name']
+        print("receive v4 rtn packet: {}:{} [{}]".format(src_addr, src_port, iface_name))
     except socket.error as e:
-        print('Expection')
-    d = {}
-    d["proto"] = "IPv4"
-    d["src-addr"]  = addr[0]
-    d["src-port"]  = addr[1]
-    d["data"]  = data
-    try:
-        pass
-        #queue.put_nowait(d)
-    except asyncio.queues.QueueFull:
-        sys.stderr.write("queue overflow, strange things happens")
+        print('Expection: {}'.format(str(e)))
+    msg = decreate_routing_packet(data)
+    ctx['core'].msg_rx(iface_name, msg)
 
 
-def cb_v6_rx(fd, ctx):
+def cb_v6_rx(fd, ctx, interface):
     try:
         data, addr = fd.recvfrom(RECVFROM_BUF_SIZE)
+        src_addr = addr[0]
+        src_port = addr[1]
+        iface_name = interface['name']
+        print("receive v6 rtn packet: {}:{} [{}]".format(src_addr, src_port, iface_name))
     except socket.error as e:
-        print('Expection')
-    d = {}
-    d["proto"] = "IPv6"
-    d["src-addr"]  = addr[0]
-    d["src-port"]  = addr[1]
-    d["data"]  = data
-    try:
-        pass
-        #queue.put_nowait(d)
-    except asyncio.queues.QueueFull:
-        sys.stderr.write("queue overflow, strange things happens")
+        print('Expection: {}'.format(str(e)))
+    msg = decreate_routing_packet(data)
+    ctx['core'].msg_rx(iface_name, msg)
 
 
 
@@ -255,7 +252,7 @@ def init_socket_v4_rx(ctx, interface):
     port = int(ctx['conf']['core']['port'])
     mcast_addr = ctx['conf']['core']['mcast-v4-tx-addr']
     fd = rx_v4_socket_create(port, mcast_addr)
-    ctx['loop'].add_reader(fd, functools.partial(cb_v4_rx, fd, ctx))
+    ctx['loop'].add_reader(fd, functools.partial(cb_v4_rx, fd, ctx, interface))
 
 
 def init_sockets_v4(ctx, interface):
@@ -298,7 +295,7 @@ def init_socket_v6_rx(ctx, interface):
     port = int(ctx['conf']['core']['port'])
     mcast_addr = ctx['conf']['core']['mcast-v6-tx-addr']
     fd = rx_v6_socket_create(port, mcast_addr)
-    ctx['loop'].add_reader(fd, functools.partial(cb_v6_rx, fd, ctx))
+    ctx['loop'].add_reader(fd, functools.partial(cb_v6_rx, fd, ctx, interface))
 
 
 def init_sockets_v6(ctx, interface):
@@ -328,8 +325,11 @@ async def ticker(ctx):
 
 
 def broadcast_routing_table(ctx):
+    if not ctx['routing-tables']:
+        return
+    print(ctx['routing-tables'])
     url = ctx['conf']['route-info-broadcaster']['url']
-    print("write routing table to {}".format(url))
+    #print("write routing table to {}".format(url))
     # just ignore any configured system proxy, we don't need
     # a proxy for localhost communication
     proxy_support = urllib.request.ProxyHandler({})
