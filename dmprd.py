@@ -326,6 +326,7 @@ async def ticker(ctx):
 
 def broadcast_routing_table(ctx):
     if not ctx['routing-tables']:
+        print("no routing table calculated, no info forwarded, yet")
         return
     print("\n\nROUTING TABLE\n\n")
     print(ctx['routing-tables'])
