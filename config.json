@@ -19,7 +19,7 @@
 							"addr-v6": "204f:8298:3c5f:fda9:e623:f1ca:c25c:6b7f",
 							"ttl-v6": "8",
 							"link-characteristics": {
-									"bandwidth": 5000,
+									"bandwidth": 10000,
 									"loss": 5
 							}
 					},
@@ -31,7 +31,7 @@
 							"ttl-v6": "8",
 							"link-characteristics": {
 									"bandwidth": 5000,
-									"loss": 10
+									"loss": 4
 							}
 					}
 			],
