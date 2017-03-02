@@ -18,6 +18,8 @@ import urllib.request
 import pprint
 
 import core.dmpr
+import httpd.httpd
+
 
 class ConfigurationException(Exception): pass
 
@@ -414,6 +416,10 @@ def main():
 
     ctx['loop'] = asyncio.get_event_loop()
     ctx['loop'].set_debug(True)
+
+    if 'httpd' in ctx['conf']:
+        print('Start HTTPD')
+        ctx['httpd'] = httpd.httpd.Httpd(ctx)
 
     init_sockets(ctx)
     setup_core(ctx)
