@@ -1,3 +1,52 @@
-div {
-    height:100vh;
+.navbar-default {
+	background-color: #1F8DFF;
+	border-color: #1F8DFF;
+}
+
+.navbar-default .navbar-brand {
+	color: #FFFFFF;
+}
+
+.navbar-default .navbar-nav > li > a {
+	color: #FFFFFF;
+}
+
+.navbar-default .navbar-nav > li > a:hover {
+	color: #FFFFFF;
+}
+
+
+.navbar-default .navbar-nav > .active > a:hover {
+	color: #FFFFFF;
+	background-color: #FF0000;
+}
+
+.navbar-default .navbar-nav > a:hover {
+	color: #FFFFFF;
+	background-color: #1F8D99;
+}
+
+.navbar-default .navbar-nav > .active > a, .navbar-default .navbar-nav > .active > a:hover, .navbar-default .navbar-nav > .active > a:focus {
+	color: #FFFFFF;
+	background-color: #1F8DFF;
+}
+
+
+.navbar-default .navbar-text {
+	color: #FFFFFF;
+}
+
+.navbar-fixed-side .navbar-nav > li > a {
+	padding-top: 10px;
+	padding-bottom: 10px;
+	border-bottom: 1px solid #1F8DFF;
+}
+
+.content {
+	background-color: #1D7CDE;
+	height:100vh;
+}
+
+#mynetwork {
+	height:100vh;
 }
