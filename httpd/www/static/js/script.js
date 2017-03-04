@@ -1,3 +1,4 @@
+
 // http://visjs.org/examples/network/data/dynamicData.html
 window.onload = function() {
 var container = document.getElementById('mynetwork');
@@ -7,42 +8,18 @@ var edges = null;
 var network = null;
 
 nodes = new vis.DataSet();
-nodes.add([
-{id: 1, font: {size:12, color:'#FFFFFF'}, value: 6, label: 'R1' , shadow:true, shape: 'image', image: "static/images/router.png"},
-{id: 2, font: {size:12, color:'#FFFFFF'}, value: 6, label: 'R1T1', shadow:true, shape: 'image', image: "static/images/wifi-router.png"},
-{id: 3, font: {size:12, color:'#FFFFFF'}, value: 6, label: 'R1T2', shadow:true, shape: 'image', image: "static/images/wifi-router.png"},
-
-{id: 4, font: {size:12, color:'#FFFFFF'}, value: 6, label: 'R2' , shadow:true, shape: 'image', image: "static/images/router.png"},
-{id: 5, font: {size:12, color:'#FFFFFF'}, value: 6, label: 'R1T1', shadow:true, shape: 'image', image: "static/images/wifi-router.png"},
-{id: 6, font: {size:12, color:'#FFFFFF'}, value: 6, label: 'R1T2', shadow:true, shape: 'image', image: "static/images/wifi-router.png"},
-
-{id: 7, font: {size:12, color:'#FFFFFF'}, value: 6, label: 'R2' , shadow:true, shape: 'image', image: "static/images/router.png"},
-{id: 8, font: {size:12, color:'#FFFFFF'}, value: 6, label: 'R1T1', shadow:true, shape: 'image', image: "static/images/wifi-router.png"},
-{id: 9, font: {size:12, color:'#FFFFFF'}, value: 6, label: 'R1T2', shadow:true, shape: 'image', image: "static/images/wifi-router.png"}
-
-]);
+//nodes.add([
+//{id: 1, font: {size:12, color:'#FFFFFF'}, value: 6, label: 'R1' , shadow:true, shape: 'image', image: "static/images/router.png"},
+//{id: 2, font: {size:12, color:'#FFFFFF'}, value: 6, label: 'R1T1', shadow:true, shape: 'image', image: "static/images/wifi-router.png"},
+//{id: 3, font: {size:12, color:'#FFFFFF'}, value: 6, label: 'R1T2', shadow:true, shape: 'image', image: "static/images/wifi-router.png"},
+//]);
 
 
 edges = new vis.DataSet();
-edges.add([
-{from: 1, to: 2, smooth:false, value: 10, title: '<b>link1</b>ff', shadow:true, color: "#ff0000"},
-{from: 1, to: 3, smooth:false, value: 6, title: 'link1', shadow:true, color: "#ff0000" },
-
-{from: 4, to: 5, smooth:false, value: 6, title: 'link1', shadow:true, color: "#ff0000"},
-{from: 4, to: 6, smooth:false, value: 6, title: 'link1', shadow:true, color: "#ff0000"},
-
-{from: 7, to: 8, smooth:false, value: 6, title: 'link1', shadow:true, color: "#ff0000"},
-{from: 7, to: 9, smooth:false, value: 6, title: 'link1', shadow:true, color: "#ff0000"},
-
-{from: 2, to: 5, smooth:false, value: 1, title: 'link2', shadow:true, color: "#d500f9"},
-{from: 3, to: 6, smooth:false, value: 5, title: 'link2', shadow:true, color: "#d500f9"},
-
-{from: 5, to: 8, smooth:false, value: 4, title: 'link2', shadow:true, color: "#d500f9"},
-{from: 6, to: 9, smooth:false, value: 5, title: 'link2', shadow:true, color: "#d500f9"},
-
-{from: 2, to: 8, smooth:false, value: 4, title: 'link2', shadow:true, color: "#d500f9"},
-{from: 3, to: 9, smooth:false, value: 5, title: 'link2', shadow:true, color: "#d500f9"}
-]);
+//edges.add([
+//{from: 1, to: 2, smooth:false, value: 10, title: '<b>link1</b>ff', shadow:true, color: "#ff0000"},
+//{from: 1, to: 3, smooth:false, value: 6, title: 'link1', shadow:true, color: "#ff0000" },
+//]);
 
 
 var container = document.getElementById('mynetwork');
@@ -51,7 +28,6 @@ var data = {
     edges: edges
 };
 var options = {
-	  stabilize: true,
 		nodes: {
 			shape: 'dot',
 			scaling:{
@@ -126,16 +102,15 @@ function removeNode() {
 		}
 }
 
-function addEdge(id_no, from_no, to_no) {
+function addEdge(from_no, to_no, color_val, val_val) {
 		try {
 				edges.add({
-						id: id_no,
 						from: from_no,
 						to: to_no,
-						value: 6,
+						value: val_val,
 						shadow:true,
 						smooth:false,
-						color: "#0000FF"
+						color: color_val
 				});
 		}
 		catch (err) {
@@ -163,19 +138,37 @@ function removeEdge() {
 		}
 }
 
-var node_add_counter = 10;
+var base_id = 10;
+
+function draw_platform() {
+			addRouter(base_id);
+			addTerminal(base_id + 1);
+			addTerminal(base_id + 2);
+			addTerminal(base_id + 3);
+
+			addEdge(base_id, base_id + 1, "#444444", 6);
+			addEdge(base_id, base_id + 2, "#444444", 6);
+			addEdge(base_id, base_id + 3, "#444444", 6);
+
+			//addEdge(base_id, base_id + 1);
+				for (i = base_id; i >= 10; i-=10) {
+				addEdge(base_id + 1, (base_id + 1) - i, "#FF0000", 6);
+				addEdge(base_id + 2, (base_id + 2) - i, "#00FF00", 5);
+				addEdge(base_id + 3, (base_id + 3) - i, "#00FF00", 4);
+			}
+
+		  base_id += 10;
+}
+
 function timeout() {
-	if (node_add_counter > 40) {
-		return;
-	}
 	setTimeout(function () {
-			addRouter(node_add_counter);
-			addTerminal(node_add_counter + 1);
-			addEdge(node_add_counter + 2, node_add_counter, node_add_counter + 1);
-			addEdge(node_add_counter + 3, node_add_counter, getRandomInt(1, 9));
-			timeout();
+
+		draw_platform();
+
+		if (base_id < 80) {
+				timeout();
+		}
 	}, 2000);
-	node_add_counter += 4;
 }
 
 timeout();
