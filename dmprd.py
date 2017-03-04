@@ -16,10 +16,12 @@ import json
 import datetime
 import urllib.request
 import pprint
+import logging
 
 import core.dmpr
 import httpd.httpd
 
+log = logging.getLogger()
 
 class ConfigurationException(Exception): pass
 
@@ -408,10 +410,22 @@ def conf_init():
     args = parse_args()
     return load_configuration_file(args)
 
+def init_logging(conf):
+    log_level_conf = "warning"
+    if "logging" in conf['core']:
+        if "level" in conf['core']["logging"]:
+            log_level_conf = conf['core']["logging"]['level']
+    numeric_level = getattr(logging, log_level_conf.upper(), None)
+    if not isinstance(numeric_level, int):
+        raise ConfigurationException('Invalid log level: {}'.format(numeric_level))
+    logging.basicConfig(level=numeric_level, format='%(message)s')
+    log.error("Log level configuration: {}".format(log_level_conf))
+
 
 def main():
-    print("Dynamic MultiPath Routing Daemon - 2016, 2017")
+    sys.stderr.write("Dynamic MultiPath Routing Daemon - 2016, 2017\n")
     conf = conf_init()
+    init_logging(conf)
     ctx = ctx_new(conf)
 
     ctx['loop'] = asyncio.get_event_loop()
