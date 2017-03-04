@@ -11,7 +11,6 @@ import functools
 import argparse
 import signal
 import os
-import uuid
 import json
 import datetime
 import urllib.request
@@ -19,6 +18,7 @@ import pprint
 import logging
 
 import core.dmpr
+import utils.id
 import httpd.httpd
 
 log = logging.getLogger()
@@ -190,12 +190,12 @@ def parse_payload(packet):
 
 
 def ctx_new(conf):
-    db = {}
-    db['conf'] = conf
-    db['iface'] = dict()
-    db['queue'] = asyncio.Queue(32)
-    db['routing-tables'] = None
-    return db
+    ctx = {}
+    ctx['conf'] = conf
+    ctx['iface'] = dict()
+    ctx['queue'] = asyncio.Queue(32)
+    ctx['routing-tables'] = None
+    return ctx
 
 
 def db_entry_update(db_entry, data, prefix):
@@ -422,11 +422,19 @@ def init_logging(conf):
     log.error("Log level configuration: {}".format(log_level_conf))
 
 
+def verify_conf_id(ctx):
+    # in the configuration file the id MAY be given, if not we
+    # generate a random one. To be a "stable" citizen we save the
+    # id permanently and resuse it as server start (if available)
+    utils.id.check_and_patch_id(ctx)
+
 def main():
     sys.stderr.write("Dynamic MultiPath Routing Daemon - 2016, 2017\n")
     conf = conf_init()
     init_logging(conf)
     ctx = ctx_new(conf)
+
+    verify_conf_id(ctx)
 
     ctx['loop'] = asyncio.get_event_loop()
     ctx['loop'].set_debug(True)

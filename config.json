@@ -1,6 +1,6 @@
 {
 	"core" : {
-			"id": "1",
+			"xxx-id": "1",
 
 			"rtn-msg-hold-time": "90",
 			"rtn-msg-interval": "30",
