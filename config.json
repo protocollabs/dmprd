@@ -1,7 +1,5 @@
 {
 	"core" : {
-			"xxx-id": "1",
-
 			"rtn-msg-hold-time": "90",
 			"rtn-msg-interval": "30",
 			"rtn-msg-interval-jitter": "7",
@@ -14,6 +12,7 @@
 			"interfaces": [
 					{
 							"name": "wifi0",
+							"type": "mcast",
 							"addr-v4": "10.10.10.228",
 							"ttl-v4": "8",
 							"addr-v6": "204f:8298:3c5f:fda9:e623:f1ca:c25c:6b7f",
@@ -25,6 +24,7 @@
 					},
 					{
 							"name": "tetra0",
+							"type": "mcast",
 							"addr-v4": "10.10.10.228",
 							"ttl-v4": "8",
 							"addr-v6": "f9c8:e83:c795:dd93:114:e409:885c:7520",
@@ -70,7 +70,7 @@
 
 
 	"route-info-broadcaster" : {
-        "url" : "http://localhost:16001/api/v1/route-full-dynamic",
+        "url" : "http://localhost:16001/api/v1/overlay-route-full-dynamic",
         "interval" : 10
 	}
 }
