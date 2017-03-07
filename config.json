@@ -13,7 +13,7 @@
 					{
 							"name": "wifi0",
 							"type": "mcast",
-							"addr-v4": "10.10.10.228",
+							"addr-v4": "10.10.10.140",
 							"ttl-v4": "8",
 							"addr-v6": "204f:8298:3c5f:fda9:e623:f1ca:c25c:6b7f",
 							"ttl-v6": "8",
@@ -25,7 +25,7 @@
 					{
 							"name": "tetra0",
 							"type": "mcast",
-							"addr-v4": "10.10.10.228",
+							"addr-v4": "10.10.10.140",
 							"ttl-v4": "8",
 							"addr-v6": "f9c8:e83:c795:dd93:114:e409:885c:7520",
 							"ttl-v6": "8",
@@ -38,12 +38,12 @@
 
 			"networks": [
 					{
-							"prefix": "34.101.177.0",
+							"prefix": "44.101.177.0",
 							"prefix-len": 24,
 							"proto": "v4"
 					},
 					{
-							"prefix": "145.183.88.0",
+							"prefix": "155.183.88.0",
 							"prefix-len": 24,
 							"proto": "v4"
 					}
