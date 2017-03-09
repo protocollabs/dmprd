@@ -332,9 +332,9 @@ def broadcast_routing_table(ctx):
     if not ctx['routing-tables']:
         print("no routing table calculated, no info forwarded, yet")
         return
-    print("\n\nROUTING TABLE\n\n")
-    print(ctx['routing-tables'])
-    print("\n\n")
+    print("\nRouting table:")
+    pprint.pprint(ctx['routing-tables'])
+    print("\n")
     url = ctx['conf']['route-info-broadcaster']['url']
     #print("write routing table to {}".format(url))
     # just ignore any configured system proxy, we don't need
