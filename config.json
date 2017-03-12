@@ -11,19 +11,7 @@
 
 		"interfaces": [
 			{
-				"name": "wifi0",
-				"type": "mcast",
-				"addr-v4": "10.10.10.228",
-				"ttl-v4": "8",
-				"addr-v6": "204f:8298:3c5f:fda9:e623:f1ca:c25c:6b7f",
-				"ttl-v6": "8",
-				"link-characteristics": {
-					"bandwidth": 10000,
-					"loss": 5
-				}
-			},
-			{
-				"name": "tetra0",
+				"name": "eth0",
 				"type": "mcast",
 				"addr-v4": "10.10.10.228",
 				"ttl-v4": "8",
@@ -53,7 +41,7 @@
 			"v4"
 		],
 
-		"profiles" : [
+		"path-metric-profiles" : [
 			{
 				"name"   : "lowest-loss",
 				"rewrite": "lowest_loss",

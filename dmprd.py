@@ -328,6 +328,34 @@ async def ticker(ctx):
     asyncio.get_event_loop().stop()
 
 
+def path_metric_profile_rewrite(ctx, table_name):
+    """ convert from internal name to rewrite name if specified"""
+    for profile in ctx['conf']['core']['path-metric-profiles']:
+        if not "rewrite" in profile:
+            continue
+        if profile['name'] == table_name:
+            return profile['rewrite']
+        if 'status' in profile and profile['status'] not in ("enabled", "true"):
+            log.error("table should not be calculated at all, internal error")
+            continue
+    return table_name
+
+
+def create_ip_routing_data(ctx, tables):
+    data = list()
+    tables = ctx['routing-tables']
+    for table_name, table_list in tables.items():
+        for route_entry in table_list:
+            new_entry = {}
+            new_entry['table-name'] = path_metric_profile_rewrite(ctx, table_name)
+            new_entry['prefix'] = route_entry['prefix']
+            new_entry['prefix-len'] = route_entry['prefix-len']
+            new_entry['interface'] = route_entry['interface']
+            new_entry['next-hop'] = route_entry['next-hop']
+            data.append(new_entry)
+    return data
+
+
 def broadcast_routing_table(ctx):
     if not ctx['routing-tables']:
         print("no routing table calculated, no info forwarded, yet")
@@ -346,8 +374,7 @@ def broadcast_routing_table(ctx):
     req.add_header('Content-Type', 'application/json')
     req.add_header('Accept', 'application/json')
     req.add_header('User-Agent', 'Mozilla/5.0 (compatible; Chrome/22.0.1229.94; Windows NT)')
-    data = dict()
-    data['route-tables'] = ctx['routing-tables']
+    data = create_ip_routing_data(ctx, ctx['routing-tables'])
     tx_data = json.dumps(data).encode('utf-8')
     try:
         with urllib.request.urlopen(req, tx_data, timeout=3) as res:
@@ -410,6 +437,7 @@ def conf_init():
     args = parse_args()
     return load_configuration_file(args)
 
+
 def init_logging(conf):
     log_level_conf = "warning"
     if "logging" in conf['core']:
@@ -427,6 +455,7 @@ def verify_conf_id(ctx):
     # generate a random one. To be a "stable" citizen we save the
     # id permanently and resuse it as server start (if available)
     utils.id.check_and_patch_id(ctx)
+
 
 def main():
     sys.stderr.write("Dynamic MultiPath Routing Daemon - 2016, 2017\n")
