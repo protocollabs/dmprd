@@ -69,12 +69,18 @@ def decreate_routing_packet(msg):
     ascii_str = msg.decode('ascii')
     return json.loads(ascii_str)
 
+def get_mcast_port(ctx, interface):
+    for e in ctx["conf"]["core"]["interfaces"]:
+        if e["name"] == interface:
+            return e["port"]
+    raise ConfigurationException("port not specified")
+
 
 def tx_v4(ctx, iface, mcast_addr, pkt):
-    port = int(ctx['conf']['core']['port'])
     fd = ctx['iface'][iface]['v4-tx-fd']
+    port = int(get_mcast_port(ctx, iface))
     try:
-        print("send v4 rtn packet tp {}:{}".format(mcast_addr, port))
+        print("send v4 rtn packet to {}:{}".format(mcast_addr, port))
         fd.sendto(pkt, (mcast_addr, port))
     except Exception as e:
         print("Exception: {}".format(str(e)))
@@ -227,11 +233,11 @@ def rx_v4_socket_create(port, mcast_addr):
 
     sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, MCAST_LOOP)
 
-    sock.bind(('', port))
+    sock.bind((mcast_addr, int(port)))
     host = socket.gethostbyname(socket.gethostname())
     sock.setsockopt(socket.SOL_IP, socket.IP_MULTICAST_IF, socket.inet_aton(host))
 
-    mreq = struct.pack("4sl", socket.inet_aton(mcast_addr), socket.INADDR_ANY)
+    mreq = socket.inet_aton(mcast_addr) + socket.inet_aton("10.2.101.41")
     sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
     return sock
 
@@ -252,16 +258,15 @@ def init_socket_v4_tx(ctx, iface):
     ctx['iface'][iface['name']]['v4-tx-fd'] = tx_v4_socket_create(addr_v4, ttl)
 
 
-def init_socket_v4_rx(ctx, interface):
-    port = int(ctx['conf']['core']['port'])
+def init_socket_v4_rx(ctx, interface, port):
     mcast_addr = ctx['conf']['core']['mcast-v4-tx-addr']
     fd = rx_v4_socket_create(port, mcast_addr)
     ctx['loop'].add_reader(fd, functools.partial(cb_v4_rx, fd, ctx, interface))
 
 
-def init_sockets_v4(ctx, interface):
+def init_sockets_v4(ctx, interface, port):
     init_socket_v4_tx(ctx, interface)
-    init_socket_v4_rx(ctx, interface)
+    init_socket_v4_rx(ctx, interface, port)
 
 
 def tx_v6_socket_create(addr, ttl):
@@ -288,34 +293,34 @@ def rx_v6_socket_create(port, mcast_addr):
 
     sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_LOOP, MCAST_LOOP)
 
-    sock.bind(('', port))
+    sock.bind(('', int(port)))
     group_bin = socket.inet_pton(addrinfo[0], addrinfo[4][0])
     mreq = group_bin + struct.pack('@I', 0)
     sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_JOIN_GROUP, mreq)
     return sock
 
 
-def init_socket_v6_rx(ctx, interface):
-    port = int(ctx['conf']['core']['port'])
+def init_socket_v6_rx(ctx, interface, port):
     mcast_addr = ctx['conf']['core']['mcast-v6-tx-addr']
     fd = rx_v6_socket_create(port, mcast_addr)
     ctx['loop'].add_reader(fd, functools.partial(cb_v6_rx, fd, ctx, interface))
 
 
-def init_sockets_v6(ctx, interface):
+def init_sockets_v6(ctx, interface, port):
     init_socket_v6_tx(ctx, interface)
-    init_socket_v6_rx(ctx, interface)
+    init_socket_v6_rx(ctx, interface, port)
 
 
 def init_sockets(ctx):
     for interface in ctx['conf']['core']['interfaces']:
         iface_name = interface['name']
+        port = interface['port']
         if not iface_name in ctx['iface']:
             ctx['iface'][iface_name] = dict()
         if "addr-v4" in interface:
-            init_sockets_v4(ctx, interface)
+            init_sockets_v4(ctx, interface, port)
         if "addr-v6" in interface:
-            init_sockets_v6(ctx, interface)
+            init_sockets_v6(ctx, interface, port)
 
 
 async def ticker(ctx):
