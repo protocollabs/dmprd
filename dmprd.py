@@ -319,6 +319,9 @@ def init_sockets_v6(ctx, interface, main_unicast_ip, port):
 def init_sockets(ctx):
     for interface in ctx['conf']['core']['interfaces']:
         iface_name = interface['name']
+        if not 'port' in interface:
+            emsg = "port not specified in configuration file for interface {}"
+            raise ConfigurationException(emsg.format(iface_name))
         port = interface['port']
         if not iface_name in ctx['iface']:
             ctx['iface'][iface_name] = dict()
