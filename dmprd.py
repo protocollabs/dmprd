@@ -227,7 +227,7 @@ def db_entry_new(conf, db, data, prefix):
     print("new route announcement for {} by {}".format(prefix, data["src-addr"]))
 
 
-def rx_v4_socket_create(port, mcast_addr):
+def rx_v4_socket_create(port, main_unicast_ip, mcast_addr):
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     if hasattr(sock, "SO_REUSEPORT"):
@@ -239,7 +239,7 @@ def rx_v4_socket_create(port, mcast_addr):
     host = socket.gethostbyname(socket.gethostname())
     sock.setsockopt(socket.SOL_IP, socket.IP_MULTICAST_IF, socket.inet_aton(host))
 
-    mreq = socket.inet_aton(mcast_addr) + socket.inet_aton("10.2.101.41")
+    mreq = socket.inet_aton(mcast_addr) + socket.inet_aton(main_unicast_ip)
     sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
     return sock
 
@@ -260,15 +260,15 @@ def init_socket_v4_tx(ctx, iface):
     ctx['iface'][iface['name']]['v4-tx-fd'] = tx_v4_socket_create(addr_v4, ttl)
 
 
-def init_socket_v4_rx(ctx, interface, port):
+def init_socket_v4_rx(ctx, interface, main_unicast_ip, port):
     mcast_addr = ctx['conf']['core']['mcast-v4-tx-addr']
-    fd = rx_v4_socket_create(port, mcast_addr)
+    fd = rx_v4_socket_create(port, main_unicast_ip, mcast_addr)
     ctx['loop'].add_reader(fd, functools.partial(cb_v4_rx, fd, ctx, interface))
 
 
-def init_sockets_v4(ctx, interface, port):
+def init_sockets_v4(ctx, interface, main_unicast_ip, port):
     init_socket_v4_tx(ctx, interface)
-    init_socket_v4_rx(ctx, interface, port)
+    init_socket_v4_rx(ctx, interface, main_unicast_ip, port)
 
 
 def tx_v6_socket_create(addr, ttl):
@@ -286,7 +286,7 @@ def init_socket_v6_tx(ctx, iface):
     ctx['iface'][iface['name']]['v6-tx-fd'] = tx_v6_socket_create(addr_v6, ttl)
 
 
-def rx_v6_socket_create(port, mcast_addr):
+def rx_v6_socket_create(port, main_unicast_ip, mcast_addr):
     addrinfo = socket.getaddrinfo(mcast_addr, None)[0]
     sock = socket.socket(addrinfo[0], socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -298,19 +298,22 @@ def rx_v6_socket_create(port, mcast_addr):
     sock.bind(('', int(port)))
     group_bin = socket.inet_pton(addrinfo[0], addrinfo[4][0])
     mreq = group_bin + struct.pack('@I', 0)
+    # FIXME: main_unicast_ip is not used for IPv6 which will to errors
+    # please use the same functionalty as already implemented for IPv4
+    # search for main_unicast_ip
     sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_JOIN_GROUP, mreq)
     return sock
 
 
-def init_socket_v6_rx(ctx, interface, port):
+def init_socket_v6_rx(ctx, interface, main_unicast_ip, port):
     mcast_addr = ctx['conf']['core']['mcast-v6-tx-addr']
-    fd = rx_v6_socket_create(port, mcast_addr)
+    fd = rx_v6_socket_create(port, main_unicast_ip, mcast_addr)
     ctx['loop'].add_reader(fd, functools.partial(cb_v6_rx, fd, ctx, interface))
 
 
-def init_sockets_v6(ctx, interface, port):
+def init_sockets_v6(ctx, interface, main_unicast_ip, port):
     init_socket_v6_tx(ctx, interface)
-    init_socket_v6_rx(ctx, interface, port)
+    init_socket_v6_rx(ctx, interface, main_unicast_ip, port)
 
 
 def init_sockets(ctx):
@@ -320,9 +323,11 @@ def init_sockets(ctx):
         if not iface_name in ctx['iface']:
             ctx['iface'][iface_name] = dict()
         if "addr-v4" in interface:
-            init_sockets_v4(ctx, interface, port)
+            main_unicast_ip = interface['addr-v4']
+            init_sockets_v4(ctx, interface, main_unicast_ip, port)
         if "addr-v6" in interface:
-            init_sockets_v6(ctx, interface, port)
+            main_unicast_ip = interface['addr-v6']
+            init_sockets_v6(ctx, interface, main_unicast_ip, port)
 
 
 async def ticker(ctx):
