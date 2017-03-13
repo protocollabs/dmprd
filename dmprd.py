@@ -69,11 +69,13 @@ def decreate_routing_packet(msg):
     ascii_str = msg.decode('ascii')
     return json.loads(ascii_str)
 
+
 def get_mcast_port(ctx, interface):
     for e in ctx["conf"]["core"]["interfaces"]:
         if e["name"] == interface:
             return e["port"]
-    raise ConfigurationException("port not specified")
+    emsg = "port not specified inconfiguration for interface {}"
+    raise ConfigurationException(emsg.format(interface))
 
 
 def tx_v4(ctx, iface, mcast_addr, pkt):
@@ -87,8 +89,8 @@ def tx_v4(ctx, iface, mcast_addr, pkt):
 
 
 def tx_v6(ctx, iface, mcast_addr, pkt):
-    port = int(ctx['conf']['core']['port'])
     fd = ctx['iface'][iface]['v6-tx-fd']
+    port = int(get_mcast_port(ctx, iface))
     try:
         print("send v6 rtn packet tp {}:{}".format(mcast_addr, port))
         fd.sendto(pkt, (mcast_addr, port))
