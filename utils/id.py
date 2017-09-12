@@ -1,21 +1,24 @@
-import uuid
-import os
 import logging
+import os
 import socket
+import uuid
 
 XDG_CACHE_HOME = os.getenv('XDG_CACHE_HOME', os.path.expanduser('~/.cache'))
 
 log = logging.getLogger()
+
 
 def _calc_uuid():
     uuid_part = str(uuid.uuid1())
     host_part = socket.gethostname()
     return "{}-{}".format(uuid_part, host_part)
 
+
 def _write_cache_id(file_path, id_no):
     os.makedirs(os.path.dirname(file_path), exist_ok=True)
     with open(file_path, "w") as fd:
         fd.write(id_no)
+
 
 def _get_cached_id(ctx):
     file_path = os.path.join(XDG_CACHE_HOME, "dmprd", "uuid-id")
@@ -30,6 +33,7 @@ def _get_cached_id(ctx):
         _write_cache_id(file_path, id_no)
         return id_no
 
+
 def check_and_patch_id(ctx):
     if 'id' in ctx['conf']['core']:
         id_no = ctx['conf']['core']['id']
@@ -39,4 +43,3 @@ def check_and_patch_id(ctx):
     id_no = _get_cached_id(ctx)
     log.info("ID is UUID: {}".format(id_no))
     ctx['conf']['core']['id'] = id_no
-

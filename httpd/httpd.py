@@ -1,5 +1,5 @@
-import os
 import asyncio
+import os
 
 try:
     from aiohttp import web
@@ -8,7 +8,6 @@ except ImportError:
 
 
 class Httpd(object):
-
     def __init__(self, ctx):
         if not web:
             print('httpd is specified in conf but aiohttp not available')
@@ -84,12 +83,8 @@ class Httpd(object):
         data = str.encode(data)
         return web.Response(body=data, content_type='text/html')
 
-
     def _setup_routes(self, ctx):
         absdir = os.path.dirname(os.path.realpath(__file__))
         app_path = os.path.join(absdir, 'www', 'static')
         ctx['app'].router.add_get('/', self.handler_index)
         ctx['app'].router.add_static('/static', app_path, show_index=True)
-
-
-
