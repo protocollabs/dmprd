@@ -1,4 +1,4 @@
-#!/usr/bin/python3
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*- 
 
 import argparse
@@ -11,8 +11,8 @@ import pprint
 import signal
 import socket
 import struct
-import sys
 import time
+import urllib.error
 import urllib.request
 import zlib
 
@@ -20,10 +20,11 @@ import core.dmpr
 import httpd.httpd
 import utils.id
 
-log = logging.getLogger()
+logger = logging.getLogger()
 
 
-class ConfigurationException(Exception): pass
+class ConfigurationException(Exception):
+    pass
 
 
 TX_DEFAULT_TTL = 8
@@ -34,28 +35,218 @@ RECVFROM_BUF_SIZE = 16384
 MCAST_LOOP = 0
 
 
-class LoggerClone:
-    def __init__(self):
-        pass
-
-    def msg(self, msg, time=None):
-        if not time:
-            time = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        msg = "{}: {}\n".format(time, msg)
-        sys.stderr.write(msg)
-
-    debug = msg
-    info = msg
-    warning = msg
-    error = msg
-    critical = msg
+def get_ip_mreqn_struct(multicast_address, interface_address, interface_name):
+    """
+    Set up a mreqn struct to define the interface we want to bind to
+    """
+    # See https://github.com/torvalds/linux/blob/866ba84ea30f94838251f74becf3cfe3c2d5c0f9/include/uapi/linux/in.h#L168
+    ip_mreqn = socket.inet_aton(multicast_address)
+    ip_mreqn += socket.inet_aton(interface_address)
+    ip_mreqn += struct.pack('@i', socket.if_nametoindex(interface_name))
+    return ip_mreqn
 
 
-def cb_routing_table_update(routing_tables, priv_data=None):
-    assert priv_data
-    ctx = priv_data
-    ctx['routing-tables'] = routing_tables
-    broadcast_routing_table(ctx)
+class MulticastTxSocket(socket.socket):
+    def __init__(self, multicast_address: str, interface_address: str,
+                 interface_name: str, ttl: int):
+        addrinfo = socket.getaddrinfo(interface_address, None)[0]
+        super(MulticastTxSocket, self).__init__(addrinfo[0], socket.SOCK_DGRAM)
+
+        if hasattr(socket, 'SO_REUSEADDR'):
+            self.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+
+        ttl_bin = struct.pack('@i', ttl)
+
+        if addrinfo[0] == socket.AF_INET:
+            # IPv4 specific socket configuration
+
+            ip_mreqn = get_ip_mreqn_struct(multicast_address, interface_address,
+                                           interface_name)
+            self.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF,
+                            ip_mreqn)
+            # Set the TTL
+            self.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, ttl_bin)
+
+        elif addrinfo[0] == socket.AF_INET6:
+            # IPv6 specific socket configuration
+
+            # IPv6 wants just the interface index, wrapped in a struct
+            iface_index = socket.if_nametoindex(interface_name)
+            self.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_IF,
+                            struct.pack('@i', iface_index))
+            # Set the TTL
+            self.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_HOPS,
+                            ttl_bin)
+
+    def send_multicast_packet(self, data, multicast_addr, port):
+        """
+        Send a multicast packet to the specified address
+        """
+        try:
+            self.sock.sendto(data, (multicast_addr, port))
+        except Exception as e:
+            logger.exception('Error while sending packet', exc_info=e)
+
+
+class MulticastRxSocket(socket.socket):
+    def __init__(self, multicast_address: str, port: int,
+                 interface_address: str, interface_name: str):
+        addrinfo = socket.getaddrinfo(multicast_address, None)[0]
+        iface_index = socket.if_nametoindex(interface_name)
+
+        super(MulticastRxSocket, self).__init__(addrinfo[0], socket.SOCK_DGRAM)
+
+        if hasattr(socket, 'SO_REUSEADDR'):
+            self.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+
+        self.bind((multicast_address, port))
+
+        if addrinfo[0] == socket.AF_INET:
+            ip_mreqn = get_ip_mreqn_struct(multicast_address, interface_address,
+                                           interface_name)
+            self.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP,
+                            ip_mreqn)
+
+            # Allow looping if MCAST_LOOP is set to 1
+            self.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP,
+                            MCAST_LOOP)
+
+        elif addrinfo[0] == socket.AF_INET6:
+            # See https://github.com/torvalds/linux/blob/866ba84ea30f94838251f74becf3cfe3c2d5c0f9/include/uapi/linux/in6.h#L60
+            # struct defines the multicast address and interface index
+            ipv6_mreq = socket.inet_pton(addrinfo[0], addrinfo[4][0])
+            ipv6_mreq += struct.pack('@i', iface_index)
+            self.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_JOIN_GROUP,
+                            ipv6_mreq)
+
+            # Allow looping if MCAST_LOOP is set to 1
+            self.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_LOOP,
+                            MCAST_LOOP)
+
+
+class DMPRD(object):
+    def __init__(self, conf, event_loop):
+        self.conf = conf
+        self.event_loop = event_loop
+
+        self.sockets = {}
+        self.queue = asyncio.Queue(32)
+        self.routing_table = None
+
+        self.setup_core()
+        self.init_sockets()
+
+    def init_sockets(self):
+        for interface in self.conf['core']['interfaces']:
+            name = interface['name']
+
+            if 'port' not in interface:
+                emsg = 'port not specified in configuration file for interface {}'
+                raise ConfigurationException(emsg.format(name))
+            port = interface['port']
+
+            self.sockets[name] = {}
+
+            for proto in 'v4', 'v6':
+                self._init_socket(proto, interface, port)
+
+    def _init_socket(self, proto, interface, port):
+        addr = interface.get('addr-{}'.format(proto), False)
+        if not addr:
+            return
+
+        ttl = int(interface.get('ttl-{}'.format(proto), TX_DEFAULT_TTL))
+        mcast_addr = self.conf['core']['mcast-{}-tx-addr'.format(proto)]
+        name = interface['name']
+        self.sockets[name][proto] = MulticastTxSocket(mcast_addr, addr, name,
+                                                      ttl)
+        rx = MulticastRxSocket(mcast_addr, port, addr, name)
+        self.event_loop.add_reader(rx,
+                                   functools.partial(self.cb_rx, rx, interface))
+
+    def setup_core(self):
+        self.core = core.dmpr.DMPR()
+        self.core.register_configuration(self.conf['core'])
+
+        self.core.register_routing_table_update_cb(self.cb_routing_table_update)
+        self.core.register_msg_tx_cb(self.cb_msg_tx)
+        self.core.register_get_time_cb(self.cb_time)
+
+        self.core.register_policy(core.dmpr.SimpleLossPolicy())
+        self.core.register_policy(core.dmpr.SimpleBandwidthPolicy())
+
+    def start(self):
+        asyncio.ensure_future(self.ticker())
+
+    def stop(self, signame):
+        logger.info('received signal {}: exit now, bye'.format(signame))
+        self.core.stop()
+        for task in asyncio.Task.all_tasks():
+            task.cancel()
+
+    async def ticker(self):
+        while True:
+            try:
+                await asyncio.sleep(1)
+                self.core.tick()
+            except asyncio.CancelledError:
+                break
+        asyncio.get_event_loop().stop()
+
+    ###########
+    # tx path #
+    ###########
+
+    def cb_msg_tx(self, interface_name: str, proto: str, mcast_addr: str,
+                  msg: dict):
+        packet = create_routing_packet(msg)
+        port = self.get_mcast_port(interface_name)
+        fd = self.sockets[interface_name][proto]
+        logger.info('send rtn packet tp {}:{}'.format(mcast_addr, port))
+        fd.send_multicast_packet(packet, mcast_addr, port)
+
+    ###########
+    # rx path #
+    ###########
+
+    def cb_rx(self, sock, interface):
+        try:
+            data, addr = sock.recvfrom(RECVFROM_BUF_SIZE)
+            src_addr = addr[0]
+            src_port = addr[1]
+            iface_name = interface['name']
+            logger.info(
+                'receive packet: {}:{} [{}]'.format(src_addr, src_port,
+                                                    iface_name))
+        except socket.error as e:
+            logger.exception('error while receiving packet', exc_info=e)
+            return
+
+        msg = decreate_routing_packet(data)
+        self.core.msg_rx(iface_name, msg)
+
+    ############
+    # internal #
+    ############
+
+    def cb_routing_table_update(self, routing_tables):
+        self.routing_table = routing_tables
+        # broadcast_routing_table(ctx)
+
+    #########
+    # utils #
+    #########
+
+    def get_mcast_port(self, interface):
+        for e in self.conf['core']['interfaces']:
+            if e['name'] == interface:
+                return e['port']
+        emsg = 'port not specified in configuration for interface {}'
+        raise ConfigurationException(emsg.format(interface))
+
+    @staticmethod
+    def cb_time():
+        return time.clock_gettime(time.CLOCK_MONOTONIC_RAW)
 
 
 def create_routing_packet(msg):
@@ -68,97 +259,15 @@ def decreate_routing_packet(msg):
     return json.loads(ascii_str)
 
 
-def get_mcast_port(ctx, interface):
-    for e in ctx["conf"]["core"]["interfaces"]:
-        if e["name"] == interface:
-            return e["port"]
-    emsg = "port not specified inconfiguration for interface {}"
-    raise ConfigurationException(emsg.format(interface))
-
-
-def tx_v4(ctx, iface, mcast_addr, pkt):
-    fd = ctx['iface'][iface]['v4-tx-fd']
-    port = int(get_mcast_port(ctx, iface))
-    try:
-        print("send v4 rtn packet to {}:{}".format(mcast_addr, port))
-        fd.sendto(pkt, (mcast_addr, port))
-    except Exception as e:
-        print("Exception: {}".format(str(e)))
-
-
-def tx_v6(ctx, iface, mcast_addr, pkt):
-    fd = ctx['iface'][iface]['v6-tx-fd']
-    port = int(get_mcast_port(ctx, iface))
-    try:
-        print("send v6 rtn packet tp {}:{}".format(mcast_addr, port))
-        fd.sendto(pkt, (mcast_addr, port))
-    except Exception as e:
-        print("Exception: {}".format(str(e)))
-
-
-def cb_msg_tx(iface_name, proto, mcast_addr, msg, priv_data=None):
-    assert priv_data
-    ctx = priv_data
-    pkt = create_routing_packet(msg)
-    if proto == 'v4':
-        tx_v4(ctx, iface_name, mcast_addr, pkt)
-    if proto == 'v6':
-        tx_v6(ctx, iface_name, mcast_addr, pkt)
-
-
-def cb_time(priv_data=None):
-    return time.clock_gettime(time.CLOCK_MONOTONIC_RAW)
-
-
-def setup_core(ctx):
-    log = LoggerClone()
-    ctx['core'] = core.dmpr.DMPR(log=log)
-
-    ctx['core'].register_configuration(ctx['conf']['core'])
-
-    ctx['core'].register_routing_table_update_cb(cb_routing_table_update,
-                                                 priv_data=ctx)
-    ctx['core'].register_msg_tx_cb(cb_msg_tx, priv_data=ctx)
-    ctx['core'].register_get_time_cb(cb_time, priv_data=ctx)
-
-
-def cb_v4_rx(fd, ctx, interface):
-    try:
-        data, addr = fd.recvfrom(RECVFROM_BUF_SIZE)
-        src_addr = addr[0]
-        src_port = addr[1]
-        iface_name = interface['name']
-        print("receive v4 rtn packet: {}:{} [{}]".format(src_addr, src_port,
-                                                         iface_name))
-    except socket.error as e:
-        print('Expection: {}'.format(str(e)))
-    msg = decreate_routing_packet(data)
-    ctx['core'].msg_rx(iface_name, msg)
-
-
-def cb_v6_rx(fd, ctx, interface):
-    try:
-        data, addr = fd.recvfrom(RECVFROM_BUF_SIZE)
-        src_addr = addr[0]
-        src_port = addr[1]
-        iface_name = interface['name']
-        print("receive v6 rtn packet: {}:{} [{}]".format(src_addr, src_port,
-                                                         iface_name))
-    except socket.error as e:
-        print('Expection: {}'.format(str(e)))
-    msg = decreate_routing_packet(data)
-    ctx['core'].msg_rx(iface_name, msg)
-
-
 def parse_payload_header(raw):
     if len(raw) < len(IDENT) + 4:
         # check for minimal length
         # ident(3) + size(>=4) + payload(>=1)
-        print("Header to short")
+        logger.error("Header to short")
         return False
     ident = raw[0:3]
     if ident != IDENT:
-        print("ident wrong: expect:{} received:{}".format(IDENT, ident))
+        logger.error("ident wrong: expect:{} received:{}".format(IDENT, ident))
         return False
     return True
 
@@ -166,53 +275,45 @@ def parse_payload_header(raw):
 def parse_payload_data(raw):
     size = struct.unpack('>I', raw[3:7])[0]
     if len(raw) < 7 + size:
-        print("message seems corrupt")
+        logger.error("message seems corrupt")
         return False, None
     data = raw[7:7 + size]
-    uncompressed_json = str(zlib.decompress(data), "utf-8")
+    uncompressed_json = str(zlib.decompress(data), 'utf-8')
     data = json.loads(uncompressed_json)
     return True, data
 
 
 def self_check(data):
-    if data["cookie"] == SECRET_COOKIE:
+    if data['cookie'] == SECRET_COOKIE:
         return True
     return False
 
 
 def parse_payload(packet):
-    ok = parse_payload_header(packet["data"])
+    ok = parse_payload_header(packet['data'])
     if not ok: return
 
-    ok, data = parse_payload_data(packet["data"])
+    ok, data = parse_payload_data(packet['data'])
     if not ok: return
 
     self = self_check(data)
     if self: return
 
     ret = {}
-    ret["src-addr"] = packet["src-addr"]
-    ret["src-port"] = packet["src-port"]
-    ret["payload"] = data
+    ret['src-addr'] = packet['src-addr']
+    ret['src-port'] = packet['src-port']
+    ret['payload'] = data
     return ret
 
 
-def ctx_new(conf):
-    ctx = {}
-    ctx['conf'] = conf
-    ctx['iface'] = dict()
-    ctx['queue'] = asyncio.Queue(32)
-    ctx['routing-tables'] = None
-    return ctx
-
-
 def db_entry_update(db_entry, data, prefix):
-    if db_entry[1]["src-ip"] != data["src-addr"]:
-        print("WARNING, seems another router ({}) also announce {}".format(
-            data["src-addr"], prefix))
-        db_entry[1]["src-ip"] = data["src-addr"]
-    print("route refresh for {} by {}".format(db_entry[0], data["src-addr"]))
-    db_entry[1]["last-seen"] = datetime.datetime.utcnow()
+    if db_entry[1]['src-ip'] != data['src-addr']:
+        logger.warning(
+            "WARNING, seems another router ({}) also announce {}".format(
+                data['src-addr'], prefix))
+        db_entry[1]['src-ip'] = data['src-addr']
+    logger.info("route refresh for {} by {}".format(db_entry[0], data['src-addr']))
+    db_entry[1]['last-seen'] = datetime.datetime.utcnow()
 
 
 def db_entry_new(conf, db, data, prefix):
@@ -220,142 +321,25 @@ def db_entry_new(conf, db, data, prefix):
     entry.append(prefix)
 
     second_element = {}
-    second_element["src-ip"] = data["src-addr"]
-    second_element["last-seen"] = datetime.datetime.utcnow()
+    second_element['src-ip'] = data['src-addr']
+    second_element['last-seen'] = datetime.datetime.utcnow()
     entry.append(second_element)
 
-    db["networks"].append(entry)
-    print(
-        "new route announcement for {} by {}".format(prefix, data["src-addr"]))
-
-
-def rx_v4_socket_create(port, main_unicast_ip, mcast_addr):
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    if hasattr(sock, "SO_REUSEPORT"):
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
-
-    sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, MCAST_LOOP)
-
-    sock.bind((mcast_addr, int(port)))
-    host = socket.gethostbyname(socket.gethostname())
-    sock.setsockopt(socket.SOL_IP, socket.IP_MULTICAST_IF,
-                    socket.inet_aton(host))
-
-    mreq = socket.inet_aton(mcast_addr) + socket.inet_aton(main_unicast_ip)
-    sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
-    return sock
-
-
-def tx_v4_socket_create(addr, ttl):
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, ttl)
-    sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF,
-                    socket.inet_aton(addr))
-    return sock
-
-
-def init_socket_v4_tx(ctx, iface):
-    addr_v4 = iface['addr-v4']
-    ttl = TX_DEFAULT_TTL
-    if 'ttl-v4' in iface:
-        ttl = int(iface['ttl-v4'])
-    ctx['iface'][iface['name']]['v4-tx-fd'] = tx_v4_socket_create(addr_v4, ttl)
-
-
-def init_socket_v4_rx(ctx, interface, main_unicast_ip, port):
-    mcast_addr = ctx['conf']['core']['mcast-v4-tx-addr']
-    fd = rx_v4_socket_create(port, main_unicast_ip, mcast_addr)
-    ctx['loop'].add_reader(fd, functools.partial(cb_v4_rx, fd, ctx, interface))
-
-
-def init_sockets_v4(ctx, interface, main_unicast_ip, port):
-    init_socket_v4_tx(ctx, interface)
-    init_socket_v4_rx(ctx, interface, main_unicast_ip, port)
-
-
-def tx_v6_socket_create(addr, ttl):
-    addrinfo = socket.getaddrinfo(addr, None)[0]
-    sock = socket.socket(addrinfo[0], socket.SOCK_DGRAM)
-    sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_HOPS, ttl)
-    return sock
-
-
-def init_socket_v6_tx(ctx, iface):
-    addr_v6 = ctx['conf']['core']['mcast-v6-tx-addr']
-    ttl = TX_DEFAULT_TTL
-    if 'ttl-v6' in iface:
-        ttl = int(iface['ttl-v6'])
-    ctx['iface'][iface['name']]['v6-tx-fd'] = tx_v6_socket_create(addr_v6, ttl)
-
-
-def rx_v6_socket_create(port, main_unicast_ip, mcast_addr):
-    addrinfo = socket.getaddrinfo(mcast_addr, None)[0]
-    sock = socket.socket(addrinfo[0], socket.SOCK_DGRAM)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    if hasattr(sock, "SO_REUSEPORT"):
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
-
-    sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_LOOP, MCAST_LOOP)
-
-    sock.bind(('', int(port)))
-    group_bin = socket.inet_pton(addrinfo[0], addrinfo[4][0])
-    mreq = group_bin + struct.pack('@I', 0)
-    # FIXME: main_unicast_ip is not used for IPv6 which will to errors
-    # please use the same functionalty as already implemented for IPv4
-    # search for main_unicast_ip
-    sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_JOIN_GROUP, mreq)
-    return sock
-
-
-def init_socket_v6_rx(ctx, interface, main_unicast_ip, port):
-    mcast_addr = ctx['conf']['core']['mcast-v6-tx-addr']
-    fd = rx_v6_socket_create(port, main_unicast_ip, mcast_addr)
-    ctx['loop'].add_reader(fd, functools.partial(cb_v6_rx, fd, ctx, interface))
-
-
-def init_sockets_v6(ctx, interface, main_unicast_ip, port):
-    init_socket_v6_tx(ctx, interface)
-    init_socket_v6_rx(ctx, interface, main_unicast_ip, port)
-
-
-def init_sockets(ctx):
-    for interface in ctx['conf']['core']['interfaces']:
-        iface_name = interface['name']
-        if not 'port' in interface:
-            emsg = "port not specified in configuration file for interface {}"
-            raise ConfigurationException(emsg.format(iface_name))
-        port = interface['port']
-        if not iface_name in ctx['iface']:
-            ctx['iface'][iface_name] = dict()
-        if "addr-v4" in interface:
-            main_unicast_ip = interface['addr-v4']
-            init_sockets_v4(ctx, interface, main_unicast_ip, port)
-        if "addr-v6" in interface:
-            main_unicast_ip = interface['addr-v6']
-            init_sockets_v6(ctx, interface, main_unicast_ip, port)
-
-
-async def ticker(ctx):
-    while True:
-        try:
-            await asyncio.sleep(1)
-            ctx['core'].tick()
-        except asyncio.CancelledError:
-            break
-    asyncio.get_event_loop().stop()
+    db['networks'].append(entry)
+    logger.info(
+        "new route announcement for {} by {}".format(prefix, data['src-addr']))
 
 
 def path_metric_profile_rewrite(ctx, table_name):
     """ convert from internal name to rewrite name if specified"""
     for profile in ctx['conf']['core']['path-metric-profiles']:
-        if not "rewrite" in profile:
+        if not 'rewrite' in profile:
             continue
         if profile['name'] == table_name:
             return profile['rewrite']
-        if 'status' in profile and profile['status'] not in ("enabled", "true"):
-            log.error("table should not be calculated at all, internal error")
+        if 'status' in profile and profile['status'] not in ('enabled', 'true'):
+            logger.error(
+                "table should not be calculated at all, internal error")
             continue
     return table_name
 
@@ -382,9 +366,9 @@ def broadcast_routing_table(ctx):
         return
     print("\nRouting table:")
     pprint.pprint(ctx['routing-tables'])
-    print("\n")
+    print()
     url = ctx['conf']['route-info-broadcaster']['url']
-    # print("write routing table to {}".format(url))
+    # print('write routing table to {}'.format(url))
     # just ignore any configured system proxy, we don't need
     # a proxy for localhost communication
     proxy_support = urllib.request.ProxyHandler({})
@@ -399,7 +383,7 @@ def broadcast_routing_table(ctx):
     tx_data = json.dumps(data).encode('utf-8')
     try:
         with urllib.request.urlopen(req, tx_data, timeout=3) as res:
-            resp = json.loads(str(res.read(), "utf-8"))
+            resp = json.loads(str(res.read(), 'utf-8'))
             print(pprint.pformat(resp))
     except urllib.error.URLError as e:
         print("Connection error: {}".format(e))
@@ -407,7 +391,7 @@ def broadcast_routing_table(ctx):
 
 async def route_broadcast(ctx):
     interval = 10
-    if "interval" in ctx['conf']['route-info-broadcaster']:
+    if 'interval' in ctx['conf']['route-info-broadcaster']:
         interval = ctx['conf']['route-info-broadcaster']['interval']
     while True:
         try:
@@ -418,102 +402,56 @@ async def route_broadcast(ctx):
     asyncio.get_event_loop().stop()
 
 
-def shutdown_dmprd(signame, ctx):
-    sys.stderr.write("\rreceived signal \"%s\": exit now, bye\n" % signame)
-    if 'core' in ctx:
-        ctx['core'].stop()
-    for task in asyncio.Task.all_tasks():
-        task.cancel()
-
-
-def parse_args():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("-f", "--configuration", help="configuration", type=str,
-                        default=None)
-    args = parser.parse_args()
-    if not args.configuration:
-        print(
-            "Configuration required, please specify a valid file path, exiting now")
-        sys.exit(1)
-    return args
-
-
 def verify_conf(conf):
-    if not "core" in conf:
+    if not 'core' in conf:
         msg = "conf invalid, need core part"
         raise ConfigurationException(msg)
     core = conf['core']
-    if not "interfaces" in core:
+    if not 'interfaces' in core:
         msg = "Configuration invalid, interfaces not in core"
         raise ConfigurationException(msg)
 
 
-def load_configuration_file(args):
-    with open(args.configuration) as json_data:
-        conf = json.load(json_data)
-        verify_conf(conf)
-        return conf
-
-
-def conf_init():
-    args = parse_args()
-    return load_configuration_file(args)
-
-
-def init_logging(conf):
-    log_level_conf = "warning"
-    if "logging" in conf['core']:
-        if "level" in conf['core']["logging"]:
-            log_level_conf = conf['core']["logging"]['level']
-    numeric_level = getattr(logging, log_level_conf.upper(), None)
-    if not isinstance(numeric_level, int):
-        raise ConfigurationException(
-            'Invalid log level: {}'.format(numeric_level))
-    logging.basicConfig(level=numeric_level, format='%(message)s')
-    log.error("Log level configuration: {}".format(log_level_conf))
-
-
-def verify_conf_id(ctx):
-    # in the configuration file the id MAY be given, if not we
-    # generate a random one. To be a "stable" citizen we save the
-    # id permanently and resuse it as server start (if available)
-    utils.id.check_and_patch_id(ctx)
+def load_conf(args):
+    conf = json.load(args.configuration)
+    verify_conf(conf)
+    utils.id.check_and_patch_id(conf)
+    return conf
 
 
 def main():
-    sys.stderr.write("Dynamic MultiPath Routing Daemon - 2016, 2017\n")
-    conf = conf_init()
-    init_logging(conf)
-    ctx = ctx_new(conf)
+    parser = argparse.ArgumentParser(
+        description="Dynamic MultiPath Routing Daemon - 2016, 2017")
+    parser.add_argument('-f', '--configuration', help='Configuration file',
+                        type=argparse.FileType('r'), required=True)
+    args = parser.parse_args()
 
-    verify_conf_id(ctx)
+    conf = load_conf(args)
 
-    ctx['loop'] = asyncio.get_event_loop()
-    ctx['loop'].set_debug(True)
+    event_loop = asyncio.get_event_loop()
+    event_loop.set_debug(True)
 
-    if 'httpd' in ctx['conf']:
-        print('Start HTTPD')
-        ctx['httpd'] = httpd.httpd.Httpd(ctx)
+    if 'httpd' in conf:
+        logger.info("Start HTTPD")
+        http_server = httpd.httpd.Httpd()
 
-    init_sockets(ctx)
-    setup_core(ctx)
-    asyncio.ensure_future(ticker(ctx))
-    if "route-info-broadcaster" in ctx['conf']:
-        asyncio.ensure_future(route_broadcast(ctx))
+    dmprd = DMPRD(conf, event_loop)
 
-    ctx['core'].start()
+    # if 'route-info-broadcaster' in conf:
+    #    asyncio.ensure_future(route_broadcast({}))
+
+    dmprd.start()
 
     for signame in ('SIGINT', 'SIGTERM'):
-        ctx['loop'].add_signal_handler(getattr(signal, signame),
-                                       functools.partial(shutdown_dmprd,
-                                                         signame, ctx))
+        event_loop.add_signal_handler(getattr(signal, signame),
+                                      functools.partial(dmprd.stop, signame))
     try:
-        ctx['loop'].run_forever()
+        event_loop.run_forever()
         # workaround for bug, see: https://bugs.python.org/issue23548
-        ctx['loop'].close()
+        event_loop.close()
     except KeyboardInterrupt:
         pass
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
