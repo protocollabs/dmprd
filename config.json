@@ -10,7 +10,7 @@
 		"interfaces": [
 			{
 				"name": "eth0",
-		    "port" : "33751",
+				"port" : 33751,
 				"type": "mcast",
 				"addr-v4": "10.10.10.228",
 				"ttl-v4": "8",
