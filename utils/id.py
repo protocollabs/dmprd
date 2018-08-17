@@ -5,7 +5,8 @@ import socket
 import uuid
 
 XDG_CACHE_HOME = os.getenv('XDG_CACHE_HOME', os.path.expanduser('~/.cache'))
-CACHE_PATH = pathlib.Path(XDG_CACHE_HOME) / 'dmprd' / 'uuid-id'
+CACHE_PATH = pathlib.Path(XDG_CACHE_HOME) / 'dmprd' / 'uuid-id'  # full path to cache file
+DIRECTORY_PATH = pathlib.Path(*CACHE_PATH.parts[:-1])  # only the path to cache file
 
 log = logging.getLogger()
 
@@ -26,7 +27,8 @@ def _get_cached_id():
         log.debug(
             'Generated new UUID {}, save at {}'.format(id_, str(CACHE_PATH)))
         try:
-            CACHE_PATH.mkdir(parents=True)
+            DIRECTORY_PATH.mkdir(parents=True)  # create path if nonexistent
+            CACHE_PATH.touch()  # create file if nonexistent
         except FileExistsError:
             pass
         with CACHE_PATH.open('w') as f:
