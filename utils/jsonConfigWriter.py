@@ -21,6 +21,9 @@ class JsonConfigWriter:
         self.jsonTemplate = self.jsonTemplateFile.read()
         self.jsonData = json.loads(self.jsonTemplate)
 
+    def set_id(self, id):
+        self.jsonData["core"]["id"] = id
+
     def set_interface_name(self, name, nr=0):
         self.jsonData["core"]["interfaces"][nr]["name"] = name
 
@@ -39,11 +42,24 @@ class JsonConfigWriter:
     def set_interface_ttl_v6(self, ttl, nr=0):
         self.jsonData["core"]["interfaces"][nr]["ttl-v6"] = ttl
 
+    def set_interface_attributes_bandwith(self, bw, nr=0):
+        self.jsonData["core"]["interfaces"][nr]["link-attributes"]["bandwidth"] = bw
+
+    def set_interface_attributes_loss(self, loss, nr=0):
+        self.jsonData["core"]["interfaces"][nr]["link-attributes"]["loss"] = loss
+
     def set_mcast_v4_tx_adr(self, address):
         self.jsonData["core"]["mcast-v4-tx-addr"] = address
 
     def set_mcast_v6_tx_adr(self, address):
         self.jsonData["core"]["mcast-v6-tx-addr"] = address
+
+    def set_network_prefix(self, prefix, len, nr=0):
+        self.jsonData["core"]["networks"][nr]["prefix"] = prefix
+        self.jsonData["core"]["networks"][nr]["prefix-len"] = len
+
+    def set_network_proto(self, proto, nr=0):
+        self.jsonData["core"]["networks"][nr]["proto"] = proto
 
     def write_output_file(self, path):
         with open(path, 'w') as outfile:
