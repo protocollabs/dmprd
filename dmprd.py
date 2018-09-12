@@ -116,8 +116,6 @@ class MulticastRxSocket(socket.socket):
             self.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 8)
             self.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, ip_mreqn)
 
-
-
         elif addrinfo[0] == socket.AF_INET6:
             # See https://github.com/torvalds/linux/blob/866ba84ea30f94838251f74becf3cfe3c2d5c0f9/include/uapi/linux/in6.h#L60
             # struct defines the multicast address and interface index
@@ -183,6 +181,9 @@ class DMPRD(object):
         self.core.register_policy(core.dmpr.SimpleBandwidthPolicy())
 
         self.core.start()
+
+    def handle_dynamic_update(self, jsonData):
+        self.core.handle_dynamic_update(jsonData)
 
     def start(self):
         asyncio.ensure_future(self.ticker())
@@ -440,11 +441,12 @@ def main():
     event_loop = asyncio.get_event_loop()
     event_loop.set_debug(True)
 
+    dmprd = DMPRD(conf, event_loop)
+
     if 'httpd' in conf:
         logger.info("Start HTTPD")
         http_server = httpd.httpd.Httpd()
-
-    dmprd = DMPRD(conf, event_loop)
+        http_server.register_api_callback(dmprd.handle_dynamic_update)
 
     # if 'route-info-broadcaster' in conf:
     #    asyncio.ensure_future(route_broadcast({}))
