@@ -50,7 +50,7 @@ class MulticastTxSocket(socket.socket):
     def __init__(self, multicast_address: str, interface_address: str,
                  interface_name: str, ttl: int):
         addrinfo = socket.getaddrinfo(interface_address, None)[0]
-        super(MulticastTxSocket, self).__init__(addrinfo[0], socket.SOCK_DGRAM)
+        super(MulticastTxSocket, self).__init__(addrinfo[0], socket.SOCK_DGRAM, socket.IPPROTO_UDP)
 
         if hasattr(socket, 'SO_REUSEADDR'):
             self.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -60,10 +60,11 @@ class MulticastTxSocket(socket.socket):
         if addrinfo[0] == socket.AF_INET:
             # IPv4 specific socket configuration
 
-            ip_mreqn = get_ip_mreqn_struct(multicast_address, interface_address,
-                                           interface_name)
-            self.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF,
-                            ip_mreqn)
+            # bind the socket to the right interface
+            # no idea why its 25, just found it somewhere in the internet and it works
+            self.setsockopt(socket.SOL_SOCKET, 25, interface_name.encode('utf-8'))
+            mreq = struct.pack("=4sl", socket.inet_aton(multicast_address), socket.INADDR_ANY)
+            self.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, mreq)
             # Set the TTL
             self.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, ttl_bin)
 
@@ -83,7 +84,7 @@ class MulticastTxSocket(socket.socket):
         Send a multicast packet to the specified address
         """
         try:
-            self.sock.sendto(data, (multicast_addr, port))
+            self.sendto(data, (str(multicast_addr), int(port)))
         except Exception as e:
             logger.exception('Error while sending packet', exc_info=e)
 
@@ -94,22 +95,25 @@ class MulticastRxSocket(socket.socket):
         addrinfo = socket.getaddrinfo(multicast_address, None)[0]
         iface_index = socket.if_nametoindex(interface_name)
 
-        super(MulticastRxSocket, self).__init__(addrinfo[0], socket.SOCK_DGRAM)
+        super(MulticastRxSocket, self).__init__(addrinfo[0], socket.SOCK_DGRAM, socket.IPPROTO_UDP)
 
         if hasattr(socket, 'SO_REUSEADDR'):
             self.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 
         self.bind((multicast_address, port))
 
+        # bind the socket to the right interface
+        # no idea why its 25, just found it somewhere in the internet and it works
+        self.setsockopt(socket.SOL_SOCKET, 25, interface_name.encode('utf-8'))
         if addrinfo[0] == socket.AF_INET:
             ip_mreqn = get_ip_mreqn_struct(multicast_address, interface_address,
-                                           interface_name)
-            self.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP,
-                            ip_mreqn)
+                                          interface_name)
 
             # Allow looping if MCAST_LOOP is set to 1
-            self.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP,
-                            MCAST_LOOP)
+            self.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, 0)
+            self.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, ip_mreqn)
+
+
 
         elif addrinfo[0] == socket.AF_INET6:
             # See https://github.com/torvalds/linux/blob/866ba84ea30f94838251f74becf3cfe3c2d5c0f9/include/uapi/linux/in6.h#L60
@@ -174,6 +178,8 @@ class DMPRD(object):
 
         self.core.register_policy(core.dmpr.SimpleLossPolicy())
         self.core.register_policy(core.dmpr.SimpleBandwidthPolicy())
+
+        self.core.start()
 
     def start(self):
         asyncio.ensure_future(self.ticker())
@@ -251,11 +257,11 @@ class DMPRD(object):
 
 def create_routing_packet(msg):
     msg_json = json.dumps(msg)
-    return str.encode(msg_json)
+    return msg_json.encode('utf-8')
 
 
 def decreate_routing_packet(msg):
-    ascii_str = msg.decode('ascii')
+    ascii_str = msg.decode('utf-8')
     return json.loads(ascii_str)
 
 
