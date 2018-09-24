@@ -1,21 +1,14 @@
 import json
 
-'''
-===============================================================================
-CLASS JsonConfigWriter
-===============================================================================
-Intended to create a config JSON file to start the dmprd.
-It uses a given template config.json with default values for every required
-field.
-Set...(): methods are used to modify the default values.
-method writeOutputFile(...): is used to write a new JSON config file with the
-modified values at a given path
-===============================================================================
-'''
-
 
 class JsonConfigWriter:
+    """Intended to create a config JSON file to start the dmprd.
+    It uses a given template config.json with default values for every required
+    field."""
     def __init__(self, path):
+        """
+        * path: filesystem path to the default config.json
+        """
         self.templatePath = path
         self.jsonTemplateFile = open(path)
         self.jsonTemplate = self.jsonTemplateFile.read()
@@ -62,5 +55,8 @@ class JsonConfigWriter:
         self.jsonData["core"]["networks"][nr]["proto"] = proto
 
     def write_output_file(self, path):
+        """ write the new config file to filesystem
+        * path: location of new config.json
+        """
         with open(path, 'w') as outfile:
             json.dump(self.jsonData, outfile)
