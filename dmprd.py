@@ -63,9 +63,7 @@ class MulticastTxSocket(socket.socket):
             # bind the socket to the right interface
             # no idea why its 25, just found it somewhere in the internet and it works
             self.setsockopt(socket.SOL_SOCKET, 25, interface_name.encode('utf-8'))
-
             mreq = struct.pack("=4sl", socket.inet_aton(multicast_address), socket.INADDR_ANY)
-
             self.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, mreq)
             # Set the TTL
             self.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, ttl_bin)
@@ -113,7 +111,6 @@ class MulticastRxSocket(socket.socket):
 
             # Allow looping if MCAST_LOOP is set to 1
             self.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, 0)
-            self.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 8)
             self.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, ip_mreqn)
 
 
