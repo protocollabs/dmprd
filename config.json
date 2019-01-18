@@ -1,27 +1,15 @@
 {
 	"core" : {
 		"id": "test-id",
-		"rtn-msg-hold-time": "90",
-		"rtn-msg-interval": "10",
-		"rtn-msg-interval-jitter": "7",
+		"rtn-msg-hold-time": "360",
+		"rtn-msg-interval": "90",
+		"rtn-msg-interval-jitter": "1",
+		"rtn-msg-interval-dynamic": false,
 
 		"mcast-v4-tx-addr": "224.0.1.241",
 		"mcast-v6-tx-addr": "ff05:0:0:0:0:0:0:2",
 
 		"interfaces": [
-			{
-				"name": "eno1",
-				"port" : 33751,
-				"type": "mcast",
-				"addr-v4": "10.10.10.228",
-				"ttl-v4": "8",
-				"addr-v6": "f9c8:e83:c795:dd93:114:e409:885c:7520",
-				"ttl-v6": "8",
-				"link-attributes": {
-					"bandwidth": 5000,
-					"loss": 4
-				}
-			},
 			{
 				"name": "eno1",
 				"port" : 33751,
@@ -40,11 +28,6 @@
 		"networks": [
 			{
 				"prefix": "44.101.177.0",
-				"prefix-len": 24,
-				"proto": "v4"
-			},
-			{
-				"prefix": "155.183.88.0",
 				"prefix-len": 24,
 				"proto": "v4"
 			}

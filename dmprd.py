@@ -207,6 +207,7 @@ class DMPRD(object):
     def cb_msg_tx(self, interface_name: str, proto: str, mcast_addr: str,
                   msg: dict):
         packet = create_routing_packet(msg)
+        packet = zlib.compress(packet, zlib.Z_BEST_COMPRESSION)
         port = self.get_mcast_port(interface_name)
         fd = self.sockets[interface_name][proto]
         logger.info('send rtn packet tp {}:{}'.format(mcast_addr, port))
@@ -226,10 +227,11 @@ class DMPRD(object):
                 'receive packet: {}:{} [{}]'.format(src_addr, src_port,
                                                     iface_name))
         except socket.error as e:
+            print("\n\n\n\n sock error")
             logger.exception('error while receiving packet', exc_info=e)
             return
 
-        msg = decreate_routing_packet(data)
+        msg = decreate_routing_packet(zlib.decompress(data))
         self.core.msg_rx(iface_name, msg)
 
     ############
@@ -285,7 +287,7 @@ def parse_payload_data(raw):
         logger.error("message seems corrupt")
         return False, None
     data = raw[7:7 + size]
-    uncompressed_json = str(zlib.decompress(data), 'utf-8')
+    uncompressed_json = str(zlib.decompress(data, zlib.Z_BEST_COMPRESSION), 'utf-8')
     data = json.loads(uncompressed_json)
     return True, data
 
