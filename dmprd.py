@@ -240,7 +240,9 @@ class DMPRD(object):
 
     def cb_routing_table_update(self, routing_tables):
         self.routing_table = routing_tables
-        # broadcast_routing_table(ctx)
+        ctx = {'conf': self.conf,
+               'routing-tables': self.routing_table}
+        broadcast_routing_table(ctx)
 
     #########
     # utils #
