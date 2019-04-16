@@ -227,7 +227,6 @@ class DMPRD(object):
                 'receive packet: {}:{} [{}]'.format(src_addr, src_port,
                                                     iface_name))
         except socket.error as e:
-            print("\n\n\n\n sock error")
             logger.exception('error while receiving packet', exc_info=e)
             return
 
