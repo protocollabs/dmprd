@@ -113,8 +113,6 @@ class MulticastRxSocket(socket.socket):
             self.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, 0)
             self.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, ip_mreqn)
 
-
-
         elif addrinfo[0] == socket.AF_INET6:
             # See https://github.com/torvalds/linux/blob/866ba84ea30f94838251f74becf3cfe3c2d5c0f9/include/uapi/linux/in6.h#L60
             # struct defines the multicast address and interface index
@@ -181,6 +179,9 @@ class DMPRD(object):
 
         self.core.start()
 
+    def handle_dynamic_update(self, jsonData):
+        self.core.handle_dynamic_update(jsonData)
+
     def start(self):
         asyncio.ensure_future(self.ticker())
 
@@ -206,6 +207,7 @@ class DMPRD(object):
     def cb_msg_tx(self, interface_name: str, proto: str, mcast_addr: str,
                   msg: dict):
         packet = create_routing_packet(msg)
+        packet = zlib.compress(packet, zlib.Z_BEST_COMPRESSION)
         port = self.get_mcast_port(interface_name)
         fd = self.sockets[interface_name][proto]
         logger.info('send rtn packet tp {}:{}'.format(mcast_addr, port))
@@ -228,7 +230,7 @@ class DMPRD(object):
             logger.exception('error while receiving packet', exc_info=e)
             return
 
-        msg = decreate_routing_packet(data)
+        msg = decreate_routing_packet(zlib.decompress(data))
         self.core.msg_rx(iface_name, msg)
 
     ############
@@ -237,7 +239,9 @@ class DMPRD(object):
 
     def cb_routing_table_update(self, routing_tables):
         self.routing_table = routing_tables
-        # broadcast_routing_table(ctx)
+        ctx = {'conf': self.conf,
+               'routing-tables': self.routing_table}
+        broadcast_routing_table(ctx)
 
     #########
     # utils #
@@ -284,7 +288,7 @@ def parse_payload_data(raw):
         logger.error("message seems corrupt")
         return False, None
     data = raw[7:7 + size]
-    uncompressed_json = str(zlib.decompress(data), 'utf-8')
+    uncompressed_json = str(zlib.decompress(data, zlib.Z_BEST_COMPRESSION), 'utf-8')
     data = json.loads(uncompressed_json)
     return True, data
 
@@ -437,11 +441,12 @@ def main():
     event_loop = asyncio.get_event_loop()
     event_loop.set_debug(True)
 
+    dmprd = DMPRD(conf, event_loop)
+
     if 'httpd' in conf:
         logger.info("Start HTTPD")
         http_server = httpd.httpd.Httpd()
-
-    dmprd = DMPRD(conf, event_loop)
+        http_server.register_api_callback(dmprd.handle_dynamic_update)
 
     # if 'route-info-broadcaster' in conf:
     #    asyncio.ensure_future(route_broadcast({}))
